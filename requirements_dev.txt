@@ -10,3 +10,5 @@ twine==1.14.0
 Click==7.0
 pytest==6.2.4
 black==21.7b0
+ib-insync==0.9.66
+eventkit==0.8.8
