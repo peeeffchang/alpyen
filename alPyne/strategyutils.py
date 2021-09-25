@@ -1,6 +1,7 @@
-import ib_insync as ibi
+from eventkit import Event
 from typing import List, Dict
 
+from . import brokerinterface
 from . import utils
 
 
@@ -10,15 +11,15 @@ class TradeCombos:
     """
 
     def __init__(self,
-                 contract_array: List[str],
+                 contract_array: List[Event],
                  combo_definition: Dict[str, List[float]] = None) -> None:
         """
         Initialize trade combo.
 
         Parameters
         ----------
-        contract_array: List[str]
-            List of contracts to be traded.
+        contract_array: List[Event]
+            List of event subscriptions on contracts to be traded.
         combo_definition: Dict[str, List[float]]
             A dictionary, with keys being combo names and values being weights to be traded.
         """
@@ -37,7 +38,7 @@ class TradeCombos:
         else:
             return None
 
-    def get_contract_array(self) -> List[str]:
+    def get_contract_array(self) -> List[Event]:
         return self._contract_array
 
 
@@ -46,21 +47,21 @@ class OrderManager:
     Class for order manager.
     """
 
-    def __init__(self, broker_handle: ibi.IB) -> None:
+    def __init__(self, broker_api: brokerinterface.BrokerAPIBase) -> None:
         """
         Initialize order manager.
 
         Parameters
         ----------
-        broker_handle: ibi.IB
-            Broker API handle.
+        broker_api: brokerinterface.BrokerAPIBase
+            Broker API.
         """
-        self._broker_handle = broker_handle
+        self._broker_handle = broker_api.get_handle()
         self._dangling_orders: Dict[
             (str, str), List[float]] = {}  # A dictionary { (strategy_name, combo_name): weight_array }
         self._entry_prices: Dict[
             (str, str), List[float]] = {}  # A dictionary { (strategy_name, combo_name): entry_price }
-        self._strategy_contracts: Dict[str, List[str]] = {}  # A dictionary { strategy_name: contract_array }
+        self._strategy_contracts: Dict[str, List[Event]] = {}  # A dictionary { strategy_name: contract_array }
         self._combo_unit: Dict[(str, str), float] = {}  # A dictionary { (strategy_name, combo_name): combo_unit }
         self._combo_weight: Dict[
             (str, str), List[float]] = {}  # A dictionary { (strategy_name, combo_name): combo_weight }
@@ -69,7 +70,7 @@ class OrderManager:
 
     def place_order(self,
                     strategy_name: str,
-                    contract_array: List[str],
+                    contract_array: List[Event],
                     weight_array: List[float],
                     combo_unit: float,
                     combo_name: str
@@ -81,8 +82,8 @@ class OrderManager:
         ----------
         strategy_name: str
             Name of the strategy placing the order.
-        contract_array: List[str]
-            List of contracts to be traded.
+        contract_array: List[Event]
+            List of event subscriptions on contracts to be traded.
         weight_array: List[float]
             Weights of the contracts to be traded.
         combo_unit: float
@@ -108,7 +109,8 @@ class OrderManager:
                 order_notional = combo_unit * weight
                 buy_sell: str = 'BUY' if order_notional > utils.EPSILON else 'SELL'
                 # TBD: Other order types, other contract types
+                # TBD: Need re-writing with brokerinterface
                 ib_order = self._broker_handle.MarketOrder(buy_sell, order_notional)
-                ib_contract = self._broker_handle.Forex(contract)
+                ib_contract = self._broker_handle.Forex(contract.name())
                 self._broker_handle.placeOrder(ib_contract, ib_order)
                 self._outstanding_order_id.append(this_order_id)

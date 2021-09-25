@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
 from collections import deque
 from datetime import timedelta
+from eventkit import Event
 from typing import List, Deque
 
 from . import datacontainer
@@ -12,7 +13,7 @@ class SignalBase(ABC):
     """
 
     def __init__(self,
-                 input_data_array: List[str],
+                 input_data_array: List[Event],
                  warmup_length: int,
                  signal_name: str) -> None:
         """
@@ -20,7 +21,7 @@ class SignalBase(ABC):
 
         Parameters
         ----------
-        input_data_array: List[str]
+        input_data_array: List[Event]
             List of event subscription that is required for signal calculation.
         warmup_length: int
             Number of data points to 'burn'
@@ -31,14 +32,15 @@ class SignalBase(ABC):
         self._signal_name = signal_name
         self._warmup_length = warmup_length
         self._initialize_data_time_storage(input_data_array)
+        self._signal_event = Event(signal_name)
 
-    def _initialize_data_time_storage(self, input_data_array: List[str]) -> None:
+    def _initialize_data_time_storage(self, input_data_array: List[Event]) -> None:
         """
         Initialize storage.
 
         Parameters
         ----------
-        input_data_array: List[str]
+        input_data_array: List[Event]
             List of event subscription that is required for signal calculation.
         """
         data_storage = {}
@@ -55,11 +57,11 @@ class SignalBase(ABC):
         if num_data == 1:
             return output  # If there is only one incoming data stream, no need to check
         for i in range(num_data):
-            event_name_i = self._input_data_array[i]
-            if len(self.get_time_by_name(event_name_i)) == 0:
+            event_i = self._input_data_array[i]
+            if len(self.get_time_by_name(event_i.name())) == 0:
                 return False
 
-            time_diff = self.get_time_by_name(data_name)[-1] - self.get_time_by_name(event_name_i)[-1]
+            time_diff = self.get_time_by_name(data_name)[-1] - self.get_time_by_name(event_i.name())[-1]
             if time_diff > timedelta(microseconds=1):
                 return False
         return output
@@ -93,6 +95,9 @@ class SignalBase(ABC):
     def get_signal_name(self) -> str:
         return self._signal_name
 
+    def get_signal_event(self) -> Event:
+        return self._signal_event
+
     @abstractmethod
     def calculate_signal(self) -> float:
         """
@@ -107,16 +112,15 @@ class MASignal(SignalBase):
     """
 
     def __init__(self,
-                 input_data_array: List[str],
-                 warmup_length: int,
-                 signal_name: str) -> None:
-        super().__init__(input_data_array, warmup_length, signal_name)
+                 input_data_array: List[Event],
+                 warmup_length: int) -> None:
+        super().__init__(input_data_array, warmup_length, input_data_array[0].name() + "_MA")
 
     def calculate_signal(self) -> float:
         """
         Compute the moving average.
         """
-        prices = self.get_data_by_name(self._input_data_array[0])
+        prices = self.get_data_by_name(self._input_data_array[0].name())
         return sum(prices) / len(prices)
 
 
@@ -125,10 +129,9 @@ class WMomSignal(SignalBase):
     Weighted momentum signal.
     """
     def __init__(self,
-                 input_data_array: List[str],
-                 warmup_length: int,
-                 signal_name: str) -> None:
-        super().__init__(input_data_array, warmup_length, signal_name)
+                 input_data_array: List[Event],
+                 warmup_length: int) -> None:
+        super().__init__(input_data_array, warmup_length, input_data_array[0].name() + "_WM")
         # Constants
         self._trading_days_in_month = 21
         self._normalization_factor = 4.0
@@ -138,7 +141,7 @@ class WMomSignal(SignalBase):
         """
         Compute the weighted momentum.
         """
-        prices = self.get_data_by_name(self._input_data_array[0])
+        prices = self.get_data_by_name(self._input_data_array[0].name())
         weighted_momentum = 0.0
         for _month in self._pivot_months:
             p0 = prices[-1]

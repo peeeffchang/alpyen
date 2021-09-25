@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
 from collections import deque
 from datetime import timedelta
+from eventkit import Event
 import math
 from typing import List, Deque, Dict
 
@@ -16,10 +17,10 @@ class StrategyBase(ABC):
     CASH_ACCOUNT_NAME = 'cash_account'
 
     def __init__(self,
-                 strategy_name: str,
-                 input_signal_array: List[str],
+                 input_signal_array: List[Event],
                  trade_combo: strategyutils.TradeCombos,
                  warmup_length: int,
+                 strategy_name: str,
                  initial_capital: float = 100.0,
                  order_manager: strategyutils.OrderManager = None) -> None:
         """
@@ -27,15 +28,15 @@ class StrategyBase(ABC):
 
         Parameters
         ----------
-        strategy_name: str
-            Name of the strategy
-        input_signal_array: List[str]
+        input_signal_array: List[Event]
             List of event subscription that is required for trade decision.
         trade_combo: TradeCombos
             TradeCombos object that defines the combos to be traded. Note that if combo definition is missing,
             all trades from this strategy will be under a generic combo.
         warmup_length: int
             Number of data points to 'burn'
+        strategy_name: str
+            Name of the strategy
         initial_capital: float
             Initial capital.
         order_manager: OrderManager
@@ -62,7 +63,7 @@ class StrategyBase(ABC):
         self._initialize_contract_time_storage(contract_array)
         self._input_signal_array = input_signal_array
 
-        position_temp = {sec_name: 0.0 for sec_name in contract_array}
+        position_temp = {security.name(): 0.0 for security in contract_array}
         # Remember to add cash account
         position_temp[self.CASH_ACCOUNT_NAME] = initial_capital
         self._contract_positions = position_temp
@@ -70,26 +71,26 @@ class StrategyBase(ABC):
         self._combo_positions = {combo_name: 0.0 for combo_name in self._combo_def.keys()}
 
         self._combo_order = {combo_name: 0.0 for combo_name in self._combo_def.keys()}
-        self._average_entry_price = {sec_name: 0.0 for sec_name in contract_array}
-        self._mtm_price = {sec_name: 0.0 for sec_name in contract_array}
+        self._average_entry_price = {security.name(): 0.0 for security in contract_array}
+        self._mtm_price = {security.name(): 0.0 for security in contract_array}
 
         self._mtm_history = [initial_capital]
 
-    def _initialize_signal_time_storage(self, input_signal_array: List[str]) -> None:
+    def _initialize_signal_time_storage(self, input_signal_array: List[Event]) -> None:
         """
         Initialize storage.
 
         Parameters
         ----------
-        input_signal_array: List[str]
+        input_signal_array: List[Event]
             List of signal subscription that is required for ordering.
         """
         signal_storage = {}
         signal_time_storage = {}
 
-        for input_name_ in input_signal_array:
-            signal_storage[input_name_] = deque([])
-            signal_time_storage[input_name_] = deque([])
+        for input_signal in input_signal_array:
+            signal_storage[input_signal.name()] = deque([])
+            signal_time_storage[input_signal.name()] = deque([])
         self._signal_storage = signal_storage
         self._signal_time_storage = signal_time_storage
 
@@ -99,13 +100,13 @@ class StrategyBase(ABC):
 
         Parameters
         ----------
-        contract_array: List[str]
+        contract_array: List[Event]
             List of contracts.
         """
         contract_time_storage = {}
 
-        for input_name_ in contract_array:
-            contract_time_storage[input_name_] = deque([])
+        for input_event in contract_array:
+            contract_time_storage[input_event.name()] = deque([])
         self._contract_time_storage = contract_time_storage
 
     def get_strategy_active(self) -> bool:
@@ -120,8 +121,8 @@ class StrategyBase(ABC):
         if num_signal == 1:
             return output  # If there is only one incoming signal stream, no need to check
         for i in range(num_signal):
-            event_name_i = self._input_signal_array[i]
-            if len(self.get_signal_time_by_name(event_name_i)) == 0:
+            event_i = self._input_signal_array[i]
+            if len(self.get_signal_time_by_name(event_i.name())) == 0:
                 return False
 
             time_diff = self.get_signal_time_by_name(signal_name)[-1] - self.get_signal_time_by_name(event_name_i)[-1]
@@ -158,7 +159,7 @@ class StrategyBase(ABC):
         if num_data == 1:
             return output  # If there is only one incoming data stream, no need to check
         for i in range(num_data):
-            event_name_i = self._contract_array[i]
+            event_name_i = self._contract_array[i].name()
             if len(self.get_contract_time_by_name(event_name_i)) == 0:
                 return False
 
@@ -222,15 +223,16 @@ class StrategyBase(ABC):
             combo_def = self._combo_def[combo_name]
             for weight_i, contract_i in zip(combo_def, self._contract_array):
                 # Adjust cash account
-                self._contract_positions[self.CASH_ACCOUNT_NAME] -= amount * weight_i * self._mtm_price[contract_i]
+                name_i = contract_i.name()
+                self._contract_positions[self.CASH_ACCOUNT_NAME] -= amount * weight_i * self._mtm_price[name_i]
                 # Calculate average cost
-                self._average_entry_price[contract_i] = self._calculate_new_average_entry_price(
-                    self._average_entry_price[contract_i],
-                    self._mtm_price[contract_i],
-                    self._contract_positions[contract_i],
+                self._average_entry_price[name_i] = self._calculate_new_average_entry_price(
+                    self._average_entry_price[name_i],
+                    self._mtm_price[name_i],
+                    self._contract_positions[name_i],
                     amount * weight_i)
                 # Modify current position
-                self._contract_positions[contract_i] += amount * weight_i
+                self._contract_positions[name_i] += amount * weight_i
             # Reset pending order
             self._combo_order[combo_name] = 0.0
 
@@ -366,8 +368,7 @@ class MACrossingStrategy(StrategyBase):
     """
 
     def __init__(self,
-                 strategy_name: str,
-                 input_signal_array: List[str],
+                 input_signal_array: List[Event],
                  trade_combo: strategyutils.TradeCombos,
                  warmup_length: int,
                  order_manager: strategyutils.OrderManager = None) -> None:
@@ -376,9 +377,7 @@ class MACrossingStrategy(StrategyBase):
 
         Parameters
         ----------
-        strategy_name: str
-            Name of the strategy
-        input_signal_array: List[str]
+        input_signal_array: List[Event]
             List of event subscription that is required for trade decision.
         trade_combo: TradeCombos
             TradeCombos object that defines the combos to be traded. Note that if combo definition is missing,
@@ -390,16 +389,16 @@ class MACrossingStrategy(StrategyBase):
         """
         if len(trade_combo.get_combo_def()) != 1:
             raise ValueError('MACrossingStrategy.__init__: Too many combos specified.')
-        super().__init__(strategy_name, input_signal_array, trade_combo, warmup_length, order_manager=order_manager)
+        super().__init__(input_signal_array, trade_combo, warmup_length, input_signal_array[0].name() + "_MACrossing", order_manager=order_manager)
         self._long_signal_name, self._short_signal_name = self._deduce_signal_name(input_signal_array)
 
-    def _deduce_signal_name(self, input_signal_array: List[str]) -> (str, str):
+    def _deduce_signal_name(self, input_signal_array: List[Event]) -> (str, str):
         """
         Deduce the name of the signal with longer (shorter) average window.
 
         Parameters
         ----------
-        input_signal_array: List[str]
+        input_signal_array: List[Event]
             List of event subscription that is required for trade decision.
 
         Returns
@@ -407,8 +406,8 @@ class MACrossingStrategy(StrategyBase):
             str, str
                 The long and short window signal names respectively.
         """
-        name_1 = input_signal_array[0]
-        name_2 = input_signal_array[1]
+        name_1 = input_signal_array[0].name()
+        name_2 = input_signal_array[1].name()
         delimiter = '_'
         substr_1 = name_1.split(delimiter)[-1]
         substr_2 = name_2.split(delimiter)[-1]
