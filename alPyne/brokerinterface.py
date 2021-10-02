@@ -4,64 +4,11 @@ from datetime import date
 import enum
 from eventkit import Event
 import ib_insync as ibi  # For Interactive Brokers (IB)
-from typing import List, Dict, Optional
+from typing import Optional, Dict, List
 
 from . import datacontainer
 from . import signal
-
-
-class DataSlot:
-    """
-    Class for data slot.
-    """
-
-    def __init__(self,
-                 data_name: str,
-                 parent_signals: List[signal.SignalBase]) -> None:
-        """
-        Initialize data slot.
-
-        Parameters
-        ----------
-        data_name: str
-            Name of the input data.
-        parent_signals: List[SignalBase]
-            Signals that listens to this data.
-        """
-        self._data_name = data_name
-        self._parent_signals = parent_signals
-        signal_events = {}
-        for _parent in self._parent_signals:
-            signal_events[_parent.get_signal_name()] = Event(name=_parent.get_signal_name())
-        self._signal_events = signal_events
-
-    def get_signal_events(self) -> Dict[str, Event]:
-        return self._signal_events
-
-    def on_event(self, new_data: datacontainer.TimeDouble) -> None:
-        """
-        Perform the action upon getting an event.
-
-        When there is an event (arrival of data) we want to
-        - Update data storage
-        - Calculate signal if warming up is complete
-
-        Parameters
-        ----------
-        new_data: TimeDouble
-            Incoming new data.
-        """
-        for _parent in self._parent_signals:
-            # 1. Update data storage
-            _parent.update_data(new_data)
-
-            # 2. If warming up is complete and all data arrived, calculate and publish signal
-            if len(_parent.get_data_by_name(new_data.get_name())) == \
-                    _parent.get_warmup_length() and _parent.check_all_received(new_data.get_name()):
-                calculated_signal = _parent.calculate_signal()
-                latest_timestamp = _parent.get_time_by_name(new_data.get_name())[-1]
-                self._signal_events[_parent.get_signal_name()].emit(
-                    datacontainer.TimeDouble(_parent.get_signal_name(), latest_timestamp, calculated_signal))
+from . import utils
 
 
 class BrokerAPIBase:
@@ -79,7 +26,7 @@ class BrokerEventRelayBase:
     """
 
     def __init__(self,
-                 listener: DataSlot,
+                 listener: signal.DataSlot,
                  data_name: str,
                  field_name: str = 'close',
                  ) -> None:
@@ -115,7 +62,7 @@ class ContractType(enum.Enum):
 class BrokerContractBase:
     """Base class for contract."""
     def __init__(self,
-                 type: ContractType,
+                 type_: ContractType,
                  symbol: str,
                  strike: Optional[float],
                  expiry: Optional[date]) -> None:
@@ -124,7 +71,7 @@ class BrokerContractBase:
 
         Parameters
         ----------
-        type: ContractType
+        type_: ContractType
             Contract type.
         symbol: str
             Ticker symbol.
@@ -133,7 +80,7 @@ class BrokerContractBase:
         expiry: Optional[date]
             Expiry (optional).
         """
-        self._type = self._type_translation(type)
+        self._type = self._type_translation(type_)
         self._symbol = symbol
         if strike is not None:
             self._strike = strike
@@ -146,7 +93,7 @@ class BrokerContractBase:
         pass
 
     @abstractmethod
-    def _type_translation(self, type: ContractType) -> str:
+    def _type_translation(self, type_: ContractType) -> str:
         pass
 
     def get_contract(self):
@@ -168,7 +115,7 @@ class IBBrokerAPI(BrokerAPIBase):
     class IBBrokerEventRelay(BrokerEventRelayBase):
         """IB event relay"""
         def __init__(self,
-                     listener: DataSlot,
+                     listener: signal.DataSlot,
                      data_name: str,
                      field_name: str = 'close',
                      ) -> None:
@@ -211,11 +158,11 @@ class IBBrokerAPI(BrokerAPIBase):
     class IBBrokerContract(BrokerContractBase):
         """Class for IB contracts."""
         def __init__(self,
-                     type: str,
+                     type_: ContractType,
                      symbol: str,
                      strike: Optional[float],
                      expiry: Optional[date]) -> None:
-            super().__init__(type, symbol, strike, expiry)
+            super().__init__(type_, symbol, strike, expiry)
 
         def _create_contract(self):
             return ibi.contract(symbol=self._symbol,
@@ -224,17 +171,90 @@ class IBBrokerAPI(BrokerAPIBase):
                                 else self._expiry.strftime('%Y%m%d'),
                                 strike=0.0 if self._strike is None else self._strike)
 
-
-        def _type_translation(self, type: ContractType) -> str:
-            if type == ContractType.Stock:
+        def _type_translation(self, type_: ContractType) -> str:
+            if type_ == ContractType.Stock:
                 return 'STK'
-            elif type == ContractType.Option:
+            elif type_ == ContractType.Option:
                 return 'OPT'
-            elif type == ContractType.FX:
+            elif type_ == ContractType.FX:
                 return 'CASH'
-            elif type == ContractType.Future:
+            elif type_ == ContractType.Future:
                 return 'FUT'
-            elif type == ContractType.Index:
+            elif type_ == ContractType.Index:
                 return 'IND'
             else:
                 raise ValueError('IBBrokerContract._type_translation: Type not implemented.')
+
+
+class OrderManager:
+    """
+    Class for order manager.
+    """
+
+    def __init__(self, broker_api: BrokerAPIBase) -> None:
+        """
+        Initialize order manager.
+
+        Parameters
+        ----------
+        broker_api: brokerinterface.BrokerAPIBase
+            Broker API.
+        """
+        self._broker_handle = broker_api.get_handle()
+        self._dangling_orders: Dict[
+            (str, str), List[float]] = {}  # A dictionary { (strategy_name, combo_name): weight_array }
+        self._entry_prices: Dict[
+            (str, str), List[float]] = {}  # A dictionary { (strategy_name, combo_name): entry_price }
+        self._strategy_contracts: Dict[str, List[Event]] = {}  # A dictionary { strategy_name: contract_array }
+        self._combo_unit: Dict[(str, str), float] = {}  # A dictionary { (strategy_name, combo_name): combo_unit }
+        self._combo_weight: Dict[
+            (str, str), List[float]] = {}  # A dictionary { (strategy_name, combo_name): combo_weight }
+        self._order_register: Dict[int, (str, str)] = {}  # A dictionary { order_id: (strategy_name, combo_name) }
+        self._outstanding_order_id: List[int] = []
+
+    def place_order(self,
+                    strategy_name: str,
+                    contract_array: List[Event],
+                    weight_array: List[float],
+                    combo_unit: float,
+                    combo_name: str
+                    ) -> None:
+        """
+        Place order that is requested by strategy.
+
+        Parameters
+        ----------
+        strategy_name: str
+            Name of the strategy placing the order.
+        contract_array: List[Event]
+            List of event subscriptions on contracts to be traded.
+        weight_array: List[float]
+            Weights of the contracts to be traded.
+        combo_unit: float
+            Number of unit to trade, i.e. a multiplier for the weight_array.
+        combo_name: str
+            Name of the combo. Each combo in a strategy should have a unique name.
+        """
+        if len(contract_array) != len(weight_array):
+            raise ValueError('OrderManager.place_order: Different numbers of contracts and weights.')
+
+        # Update dangling order status
+        self._dangling_orders[(strategy_name, combo_name)] = weight_array
+        self._entry_prices[(strategy_name, combo_name)] = [0.0] * len(weight_array)
+        self._strategy_contracts[strategy_name] = contract_array
+        self._combo_unit[(strategy_name, combo_name)] = combo_unit
+        self._combo_weight[(strategy_name, combo_name)] = weight_array
+
+        for contract, weight in zip(contract_array, weight_array):
+            if abs(weight) > utils.EPSILON:
+                this_order_id = self._broker_handle.getReqId()
+                self._order_register[this_order_id] = (strategy_name, combo_name)
+
+                order_notional = combo_unit * weight
+                buy_sell: str = 'BUY' if order_notional > utils.EPSILON else 'SELL'
+                # TBD: Other order types, other contract types
+                # TBD: Need re-writing with brokerinterface
+                ib_order = self._broker_handle.MarketOrder(buy_sell, order_notional)
+                ib_contract = self._broker_handle.Forex(contract.name())
+                self._broker_handle.placeOrder(ib_contract, ib_order)
+                self._outstanding_order_id.append(this_order_id)

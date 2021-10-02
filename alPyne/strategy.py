@@ -5,9 +5,46 @@ from eventkit import Event
 import math
 from typing import List, Deque, Dict
 
+from . import brokerinterface
 from . import datacontainer
-from . import strategyutils
 from . import utils
+
+
+class TradeCombos:
+    """
+    Class for trade combos, which is a basket of contracts traded by a strategy.
+    """
+
+    def __init__(self,
+                 contract_array: List[Event],
+                 combo_definition: Dict[str, List[float]] = None) -> None:
+        """
+        Initialize trade combo.
+
+        Parameters
+        ----------
+        contract_array: List[Event]
+            List of event subscriptions on contracts to be traded.
+        combo_definition: Dict[str, List[float]]
+            A dictionary, with keys being combo names and values being weights to be traded.
+        """
+        if combo_definition is not None:
+            for key, value in combo_definition.items():
+                if len(contract_array) != len(value):
+                    raise ValueError('TradeCombo.__init__: Different numbers of contracts and weights.')
+            self._combo_definition = combo_definition
+        else:
+            self._combo_definition = None
+        self._contract_array = contract_array
+
+    def get_combo_def(self) -> Dict[str, List[float]]:
+        if self._combo_definition is not None:
+            return self._combo_definition
+        else:
+            return None
+
+    def get_contract_array(self) -> List[Event]:
+        return self._contract_array
 
 
 class StrategyBase(ABC):
@@ -18,11 +55,11 @@ class StrategyBase(ABC):
 
     def __init__(self,
                  input_signal_array: List[Event],
-                 trade_combo: strategyutils.TradeCombos,
+                 trade_combo: TradeCombos,
                  warmup_length: int,
                  strategy_name: str,
                  initial_capital: float = 100.0,
-                 order_manager: strategyutils.OrderManager = None) -> None:
+                 order_manager: brokerinterface.OrderManager = None) -> None:
         """
         Initialize strategy base.
 
@@ -87,14 +124,20 @@ class StrategyBase(ABC):
         """
         signal_storage = {}
         signal_time_storage = {}
-
+        signal_slot_storage = []
         for input_signal in input_signal_array:
             signal_storage[input_signal.name()] = deque([])
             signal_time_storage[input_signal.name()] = deque([])
+
+            this_signal_slot = SignalSlot(input_signal.name(), [self])
+            signal_slot_storage.append(this_signal_slot)
+            # Connect event to slot
+            input_signal += this_signal_slot.on_event
         self._signal_storage = signal_storage
         self._signal_time_storage = signal_time_storage
+        self._signal_slot_storage = signal_slot_storage
 
-    def _initialize_contract_time_storage(self, contract_array: List[str]) -> None:
+    def _initialize_contract_time_storage(self, contract_array: List[Event]) -> None:
         """
         Initialize storage.
 
@@ -104,10 +147,16 @@ class StrategyBase(ABC):
             List of contracts.
         """
         contract_time_storage = {}
-
+        mtm_price_slot_storage = []
         for input_event in contract_array:
             contract_time_storage[input_event.name()] = deque([])
+
+            this_mtm_price_slot = MTMPriceSlot(input_event.name(), [self])
+            mtm_price_slot_storage.append(this_mtm_price_slot)
+            # Connect event to slot
+            input_event += this_mtm_price_slot.on_event
         self._contract_time_storage = contract_time_storage
+        self._mtm_price_slot_storage = mtm_price_slot_storage
 
     def get_strategy_active(self) -> bool:
         return self._strategy_active
@@ -125,7 +174,7 @@ class StrategyBase(ABC):
             if len(self.get_signal_time_by_name(event_i.name())) == 0:
                 return False
 
-            time_diff = self.get_signal_time_by_name(signal_name)[-1] - self.get_signal_time_by_name(event_name_i)[-1]
+            time_diff = self.get_signal_time_by_name(signal_name)[-1] - self.get_signal_time_by_name(event_i.name())[-1]
             if time_diff > timedelta(microseconds=1):
                 return False
         return output
@@ -181,6 +230,9 @@ class StrategyBase(ABC):
         self.get_contract_time_by_name(new_data.get_name()).append(new_data.get_time())
         if len(self.get_contract_time_by_name(new_data.get_name())) > 1:
             self.get_contract_time_by_name(new_data.get_name()).popleft()
+
+    def get_mtm_history(self) -> List[float]:
+        return self._mtm_history
 
     def get_contract_time_by_name(self, data_name: str) -> Deque:
         return self._contract_time_storage[data_name]
@@ -369,9 +421,9 @@ class MACrossingStrategy(StrategyBase):
 
     def __init__(self,
                  input_signal_array: List[Event],
-                 trade_combo: strategyutils.TradeCombos,
+                 trade_combo: TradeCombos,
                  warmup_length: int,
-                 order_manager: strategyutils.OrderManager = None) -> None:
+                 order_manager: brokerinterface.OrderManager = None) -> None:
         """
         Initialize MA Crossing Strategy.
 
@@ -389,7 +441,8 @@ class MACrossingStrategy(StrategyBase):
         """
         if len(trade_combo.get_combo_def()) != 1:
             raise ValueError('MACrossingStrategy.__init__: Too many combos specified.')
-        super().__init__(input_signal_array, trade_combo, warmup_length, input_signal_array[0].name() + "_MACrossing", order_manager=order_manager)
+        super().__init__(input_signal_array, trade_combo, warmup_length, input_signal_array[0].name()
+                         + "_MACrossing", order_manager=order_manager)
         self._long_signal_name, self._short_signal_name = self._deduce_signal_name(input_signal_array)
 
     def _deduce_signal_name(self, input_signal_array: List[Event]) -> (str, str):
@@ -432,3 +485,104 @@ class MACrossingStrategy(StrategyBase):
                 return {combo_name: 0.0}
         else:
             return {combo_name: 0.0}
+
+
+class SlotBase:
+    """
+    Base class for slot, to be derived for Strategy.
+    """
+
+    def __init__(self,
+                 data_name: str,
+                 parent_strategies: List[StrategyBase]) -> None:
+        """
+        Initialize base slot.
+
+        Parameters
+        ----------
+        data_name: str
+            Name of the input data.
+        parent_strategies: List[StrategyBase]
+            Strategies that listens to this data.
+        """
+        self._data_name = data_name
+        self._parent_strategies = parent_strategies
+
+    @abstractmethod
+    def on_event(self, new_data: datacontainer.TimeDouble) -> None:
+        """
+        Perform the action upon getting an event.
+        """
+        pass
+
+
+class SignalSlot(SlotBase):
+    """
+    Class for signal slot.
+    """
+
+    def __init__(self,
+                 data_name: str,
+                 parent_strategies: List[StrategyBase]) -> None:
+        super().__init__(data_name, parent_strategies)
+
+    def on_event(self, new_signal: datacontainer.TimeDouble) -> None:
+        """
+        Perform the action upon getting an event.
+
+        When there is an event (arrival of signal) we want to
+        - Update signal storage
+        - Make trade decision if warming up is complete
+        - Send order
+
+        Parameters
+        ----------
+        new_signal: TimeDouble
+            Incoming new signal.
+        """
+        for _parent in self._parent_strategies:
+            # 1. Update signal storage
+            _parent.update_data(new_signal)
+
+            # 2. If warming up is complete and all data arrived, make trade decision
+            if len(_parent.get_signal_by_name(new_signal.get_name())) == _parent.get_warmup_length()\
+                    and _parent.check_all_signals_received(new_signal.get_name()):
+                if _parent.get_strategy_active():
+                    _parent._combo_order = _parent.make_order_decision()
+                    # 3. Send order
+                    if _parent.get_is_live_trading():
+                        _parent.send_order()
+
+
+class MTMPriceSlot(SlotBase):
+    """
+    Class for marking to market price slot.
+    """
+
+    def __init__(self,
+                 data_name: str,
+                 parent_strategies: List[StrategyBase]) -> None:
+        super().__init__(data_name, parent_strategies)
+
+    def on_event(self, new_data: datacontainer.TimeDouble) -> None:
+        """
+        Perform the action upon getting an event.
+
+        When there is an event (arrival of contract prices) we want to
+        - Update mtm price storage
+        - Mark to market
+
+        Parameters
+        ----------
+        new_data: TimeDouble
+            Incoming new data.
+        """
+        for _parent in self._parent_strategies:
+            # 1. Update mtm price storage
+            _parent.update_mtm(new_data)
+            if _parent.check_all_contract_data_received(new_data.get_name()):
+                # 2. Send order
+                if not _parent.get_is_live_trading():
+                    _parent.send_order()
+                # 3. Mark to market
+                _parent.calculate_mtm()

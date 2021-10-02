@@ -1,8 +1,4 @@
-from eventkit import Event
-
 from . import brokerinterface
-from . import datacontainer
-from . import eventslot
 
 
 class EventContext:

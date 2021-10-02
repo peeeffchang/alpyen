@@ -1,7 +1,12 @@
 import enum
+from eventkit import Event
+from itertools import accumulate
+import random
 from typing import List, Dict
 
 from . import datacontainer
+from . import signal
+from . import strategy
 
 
 class PathGenerationType(enum.Enum):
@@ -92,5 +97,275 @@ class Backtester:
         self._strategy_info = strategy_info
         self._number_simulation = number_simulation
 
-    def run_backtest(self) -> None:
-        pass
+    def run_backtest(self,
+                     path_type: PathGenerationType = PathGenerationType.ReturnShuffling) -> None:
+        """
+        Run backtest.
+
+        Parameters
+        ----------
+        path_type: PathGenerationType
+            Path generation type.
+        """
+        # Build dictionaries to store simulation results
+        simulation_results_dict: Dict[str, Dict[str, List[float]]] = {}
+        for key in self._strategy_info.keys():
+            simulation_results_dict[key] = {}
+
+        for sim_i in range(self._number_simulation):
+            # Create incoming data
+            data_event_dict: Dict[str, Event] = {}
+            for name in self._names:
+                data_event_dict[name] = Event(name)
+
+            # Create signals
+            signal_dict = self.create_signal_dict(data_event_dict)
+
+            # Create strategies
+            strategy_dict = self.create_strategy_dict(signal_dict, data_event_dict)
+
+            # Read and fire data; the first trial is always the actual history
+            price_dict: Dict[str, List[float]] = {}
+            for j in range(len(self._aggregated_input)):
+                if sim_i == 0:
+                    price_dict[self._aggregated_input[j].get_name()] = self._aggregated_input[j].get_price()
+                else:
+                    price_dict[self._aggregated_input[j].get_name()] = \
+                        self.generate_simulated_path(self._aggregated_input[j].get_price(), path_type)
+
+            for t in range(len(price_dict[next(iter(price_dict))])):
+                for k, v in data_event_dict.items():
+                    data_name = k
+                    timestamp = self._aggregated_input[0].get_timestamp()[t]
+                    price = price_dict[data_name][t]
+                    v.emit(datacontainer.TimeDouble(data_name, timestamp, price))
+
+            # Save results
+            for k, v in strategy_dict.items():
+                simulation_results_dict[k][k + str(sim_i)] = v.get_mtm_history()
+        # Analyze results and print out
+        metrics_to_calculate = [MetricType.PoorMansSharpeRatio,
+                                MetricType.MaximumDrawDown,
+                                MetricType.Return]
+        for key in self._strategy_info.keys():
+            metrics = self.calculate_metrics(simulation_results_dict[key], metrics_to_calculate)
+            print(metrics)
+
+    def create_signal_dict(self,
+                           data_event_dict: Dict[str, Event]) -> Dict[str, signal.SignalBase]:
+        """
+        Create signal dictionary.
+
+        Parameters
+        ----------
+        data_event_dict: Dict[str, Event]
+            Data event dictionary.
+        """
+        output_dict: Dict[str, signal.SignalBase] = {}
+        signal_info_dict: Dict[str, SignalInfo] = self._signal_info
+        for k, v in signal_info_dict.items():
+            price_event_list: List[Event] = []
+            for name_i in v.get_input_names():
+                price_event_list.append(data_event_dict.get(name_i))
+            # Different signal cases
+            if k.find("_MA") != -1:
+                output_dict[k] = signal.MASignal(price_event_list, int(v.get_params()[0]))
+            elif k.find("_WM") != -1:
+                output_dict[k] = signal.WMomSignal(price_event_list, int(v.get_params()[0]))
+            else:
+                raise ValueError('Backtester.create_signal_dict: unknown signal class ' + k)
+        return output_dict
+
+    def create_strategy_dict(self,
+                             signal_dict: Dict[str, signal.SignalBase],
+                             data_event_dict: Dict[str, Event]) -> Dict[str, strategy.StrategyBase]:
+        """
+        Create strategy dictionary.
+
+        Parameters
+        ----------
+        signal_dict: Dict[str, signal.SignalBase]
+            Signal dictionary.
+        data_event_dict: Dict[str, Event]
+            Data event dictionary.
+        """
+        output_dict: Dict[str, strategy.StrategyBase] = {}
+        strategy_info_dict: Dict[str, StrategyInfo] = self._strategy_info
+        for k, v in strategy_info_dict.items():
+            price_event_list: List[Event] = []
+            for i in range(len(v.get_combo_names())):
+                price_event_list.append(data_event_dict.get(v.get_combo_names()[i]))
+            # Different strategy cases
+            if k.find("_MACrossing") != -1:
+                signal_event_list: List[Event] = []
+                for i in range(len(v.get_input_names())):
+                    signal_event_list.append(signal_dict.get(v.get_input_names()[i]).get_signal_event())
+                macrossing_tc = strategy.TradeCombos(price_event_list, {'combo1': [1.0]})
+                output_dict[k] = strategy.MACrossingStrategy(signal_event_list, macrossing_tc, int(v.get_params()[0]))
+            else:
+                raise ValueError('Backtester.create_strategy_dict: unknown strategy class ' + k)
+        return output_dict
+
+    def generate_simulated_path(self,
+                                original_data: List[float],
+                                path_type: PathGenerationType = PathGenerationType.ReturnShuffling) -> List[float]:
+        """
+        Generate simulated path from original price data.
+
+        Parameters
+        ----------
+        original_data: List[float]
+            Original price data array.
+        path_type: PathGenerationType
+            Path generation type.
+
+        Returns
+        -------
+            List[float]
+                Simulated price data.
+        """
+        if path_type == PathGenerationType.ReturnShuffling:
+            return self.generate_shuffled_return_path(original_data)
+        elif path_type == PathGenerationType.ReturnResampling:
+            return self.generate_resampled_return_path(original_data)
+        else:
+            raise ValueError('Backtester.generate_simulated_path: Unknown generation type.')
+
+    def generate_shuffled_return_path(self,
+                                      original_data: List[float]) -> List[float]:
+        """
+        Generate shuffled path from original price data.
+
+        Parameters
+        ----------
+        original_data: List[float]
+            Original price data array.
+
+        Returns
+        -------
+            List[float]
+                Simulated price data.
+        """
+        # Calculate return from price
+        return_list = [p_t / p_tm1 - 1 for p_t, p_tm1 in zip(original_data[1:], original_data[:-1])]
+
+        # Shuffle
+        random.shuffle(return_list)
+
+        # Create new price series
+        price_t0 = original_data[0]
+        return_list = [price_t0] + return_list
+        new_data = [*accumulate(return_list, lambda a, b: a * (1.0 + b))]
+        return new_data
+
+    def generate_resampled_return_path(self,
+                                       original_data: List[float]) -> List[float]:
+        """
+        Generate resampled path from original price data.
+
+        Parameters
+        ----------
+        original_data: List[float]
+            Original price data array.
+
+        Returns
+        -------
+            List[float]
+                Simulated price data.
+        """
+        # Calculate return from price
+        return_list = [p_t / p_tm1 - 1 for p_t, p_tm1 in zip(original_data[1:], original_data[:-1])]
+
+        # Sample
+        random_indices = list(range(0, len(return_list), 1))
+        random.shuffle(random_indices)
+        return_randomized = [return_list[i] for i in random_indices]
+
+        # Create new price series
+        price_t0 = original_data[0]
+        return_randomized = [price_t0] + return_randomized
+        new_data = [*accumulate(return_randomized, lambda a, b: a * (1.0 + b))]
+        return new_data
+
+    def calculate_metrics(self,
+                          simulation_results: Dict[str, List[float]],
+                          metrics_to_calculate: List[MetricType]):
+        """
+        Calculate a set of specifiec metrics.
+
+        Parameters
+        ----------
+        simulation_results: Dict[str, List[float]]
+            Simulation results.
+        metrics_to_calculate: List[MetricType]
+            Entities to calculate
+
+        Returns
+        -------
+            Dict[MetricType, List[float]]
+                Metrics.
+        """
+        output = {}
+
+        for i in range(len(metrics_to_calculate)):
+            metric_storage = []
+            for k, v in simulation_results.items():
+                return_list = [p_t / p_tm1 - 1 for p_t, p_tm1 in zip(v[1:], v[:-1])]
+                price_list = v
+                if metrics_to_calculate[i] == MetricType.PoorMansSharpeRatio:
+                    metric_storage.append(self.calculate_poor_mans_sharpe_ratio(return_list))
+                elif metrics_to_calculate[i] == MetricType.MaximumDrawDown:
+                    metric_storage.append(self.calculate_mdd(price_list))
+                elif metrics_to_calculate[i] == MetricType.Return:
+                    metric_storage.append(price_list[-1] / price_list[0] - 1.0)
+                else:
+                    raise ValueError('Backtester.calculate_metrics: Unknown metrics type.')
+            output[str(metrics_to_calculate[i])] = metric_storage
+        return output
+
+    def calculate_poor_mans_sharpe_ratio(self,
+                                         return_list: List[float]) -> float:
+        """
+        Calculate 'poor man's Sharpe ratio' (i.e. assuming risk-free rate is zero)
+
+        Parameters
+        ----------
+        return_list: List[float]
+            Return series.
+
+        Returns
+        -------
+            float
+                Poor man's Sharpe ratio.
+        """
+        if len(return_list) == 0:
+            return 0.0
+        else:
+            average = sum(return_list) / len(return_list)
+            deviation_squared = [(x - average)**2 for x in return_list]
+            return average / (sum(deviation_squared) / (len(deviation_squared) - 1))**0.5
+
+    def calculate_mdd(self,
+                      price_list: List[float]) -> float:
+        """
+        Calculate maximum drawdown
+
+        Parameters
+        ----------
+        price_list: List[float]
+            Price series.
+
+        Returns
+        -------
+            float
+                Maximum drawdown.
+        """
+        mdd = 0.0
+        peak = price_list[0]
+        for p_i in price_list:
+            if p_i > peak:
+                peak = p_i
+            dd = (peak - p_i) / peak
+            if dd > mdd:
+                mdd = dd
+        return mdd
