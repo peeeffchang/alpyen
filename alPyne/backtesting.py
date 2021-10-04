@@ -96,6 +96,7 @@ class Backtester:
         self._signal_info = signal_info
         self._strategy_info = strategy_info
         self._number_simulation = number_simulation
+        self._results: Dict[str, Dict[str, List[float]]] = {}
 
     def run_backtest(self,
                      path_type: PathGenerationType = PathGenerationType.ReturnShuffling) -> None:
@@ -149,7 +150,10 @@ class Backtester:
                                 MetricType.Return]
         for key in self._strategy_info.keys():
             metrics = self.calculate_metrics(simulation_results_dict[key], metrics_to_calculate)
-            print(metrics)
+            self._results[key] = metrics
+
+    def get_results(self):
+        return self._results
 
     def create_signal_dict(self,
                            data_event_dict: Dict[str, Event]) -> Dict[str, signal.SignalBase]:
@@ -289,7 +293,7 @@ class Backtester:
 
     def calculate_metrics(self,
                           simulation_results: Dict[str, List[float]],
-                          metrics_to_calculate: List[MetricType]):
+                          metrics_to_calculate: List[MetricType]) -> Dict[str, List[float]]:
         """
         Calculate a set of specifiec metrics.
 
@@ -302,7 +306,7 @@ class Backtester:
 
         Returns
         -------
-            Dict[MetricType, List[float]]
+            Dict[str, List[float]]
                 Metrics.
         """
         output = {}

@@ -273,6 +273,7 @@ class StrategyBase(ABC):
         """
         for combo_name, amount in self._combo_order.items():
             combo_def = self._combo_def[combo_name]
+            self._combo_positions[combo_name] += amount
             for weight_i, contract_i in zip(combo_def, self._contract_array):
                 # Adjust cash account
                 name_i = contract_i.name()

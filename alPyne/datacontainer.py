@@ -120,6 +120,11 @@ class DataUtils:
         """
         file_extension = '.csv'
         df = pd.read_csv(path + ticker + file_extension)
-        yahoo_date_format = '%m/%d/%Y'
+        if str(df['Date'][0]).find('/') != -1:
+            yahoo_date_format = '%m/%d/%Y'
+        elif str(df['Date'][0]).find('-') != -1:
+            yahoo_date_format = '%Y-%m-%d'
+        else:
+            raise ValueError('DataUtils.read_yahoo_data: Unknown date format.')
         datetime_list = [datetime.strptime(x, yahoo_date_format) for x in df['Date'].tolist()]
         return PriceTimeSeries(ticker, datetime_list, df['Adj Close'].tolist())
