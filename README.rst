@@ -29,6 +29,8 @@ Installation
     pip install alpyen
 
 
+Example
+-------
 .. code-block:: python
 
     from alpyen import datacontainer
