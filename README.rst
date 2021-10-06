@@ -63,6 +63,8 @@ Example
                                            number_path)
     my_backtester.run_backtest()
     backtest_results = my_backtester.get_results()
+    
+The moving average signal and the MA-crossing trading strategy are intended to serve as examples. Users can use them as references and create their custom signals/strategies by deriving from the ``SignalBase`` class within the ``signal`` module, and the ``StrategyBase`` class within the ``strategy`` module.
 
 Features
 --------
