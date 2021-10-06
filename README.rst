@@ -22,6 +22,45 @@ Python based algo trading platform for IB.
 * Free software: GNU General Public License v3
 * Documentation: https://alpyen.readthedocs.io.
 
+Installation
+------------
+::
+
+    pip install alpyen
+
+
+.. code-block:: python
+
+    from alpyen import datacontainer
+    from alpyen import backtesting
+
+    # Read data (assuming that BBH.csv from Yahoo Finance is in the Data folder)
+    data_folder_path = 'Data\\'
+    ticker_name = 'BBH'
+    short_lookback = 5
+    long_lookback = 200
+    ticker_names = [ticker_name]
+    all_input = datacontainer.DataUtils.aggregate_yahoo_data(ticker_names, data_folder_path)
+
+    # Subscribe to signals
+    signal_info_dict = {}
+    signal_info_dict[ticker_name + '_MA_' + str(short_lookback)]\
+        = backtesting.SignalInfo(ticker_names, [short_lookback])
+    signal_info_dict[ticker_name + '_MA_' + str(long_lookback)]\
+        = backtesting.SignalInfo(ticker_names, [long_lookback])
+
+    # Subscribe to strategies
+    strategy_info_dict = {}
+    strategy_name = ticker_name + '_MACrossing_01'
+    strategy_info_dict[strategy_name] = backtesting.StrategyInfo(
+        [ticker_name + '_MA_' + str(short_lookback), ticker_name + '_MA_' + str(long_lookback)], [1], [ticker_name])
+
+    # Create backtester and run backtest
+    number_path = 1000
+    my_backtester = backtesting.Backtester(all_input, ticker_names, signal_info_dict, strategy_info_dict,
+                                           number_path)
+    my_backtester.run_backtest()
+    backtest_results = my_backtester.get_results()
 
 Features
 --------
@@ -33,11 +72,9 @@ Providing a trading platform for IB that includes the functions of
 * Automatic trading
 * Book management
 
-Road Map
---------
-* Python notebook functioning prototype
-* Python package functioning prototype
-* Further enhancement
+Current Version
+---------------
+Able to perform backtesting. Live trading support in development.
 
 Credits
 -------
