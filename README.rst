@@ -27,6 +27,7 @@ Features
 --------
 
 Providing a trading platform for IB that includes the functions of
+
 * Data gathering
 * Algo signal calculation
 * Automatic trading
