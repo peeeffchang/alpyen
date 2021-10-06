@@ -24,5 +24,5 @@ deploy:
     secure: PLEASE_REPLACE_ME
   on:
     tags: true
-    repo: peeeffchang/alpyne
+    repo: peeeffchang/alpyen
     python: 3.8

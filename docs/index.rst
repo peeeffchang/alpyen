@@ -1,4 +1,4 @@
-Welcome to alPyne's documentation!
+Welcome to alpyen's documentation!
 ======================================
 
 .. toctree::

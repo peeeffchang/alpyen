@@ -1,16 +1,16 @@
 ======
-alPyne
+alpyen
 ======
 
 
-.. image:: https://img.shields.io/pypi/v/alpyne.svg
-        :target: https://pypi.python.org/pypi/alpyne
+.. image:: https://img.shields.io/pypi/v/alpyen.svg
+        :target: https://pypi.python.org/pypi/alpyen
 
-.. image:: https://img.shields.io/travis/peeeffchang/alpyne.svg
-        :target: https://travis-ci.com/peeeffchang/alpyne
+.. image:: https://img.shields.io/travis/peeeffchang/alpyen.svg
+        :target: https://travis-ci.com/peeeffchang/alpyen
 
-.. image:: https://readthedocs.org/projects/alpyne/badge/?version=latest
-        :target: https://alpyne.readthedocs.io/en/latest/?version=latest
+.. image:: https://readthedocs.org/projects/alpyen/badge/?version=latest
+        :target: https://alpyen.readthedocs.io/en/latest/?version=latest
         :alt: Documentation Status
 
 
@@ -20,7 +20,7 @@ Python based algo trading platform for IB.
 
 
 * Free software: GNU General Public License v3
-* Documentation: https://alpyne.readthedocs.io.
+* Documentation: https://alpyen.readthedocs.io.
 
 
 Features
