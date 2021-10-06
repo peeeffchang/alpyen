@@ -78,6 +78,12 @@ Current Version
 ---------------
 Able to perform backtesting. Live trading support in development.
 
+Support This Project
+--------------------
+* Use and discuss us
+* Report a bug
+* Submit a bug fix
+
 Credits
 -------
 
