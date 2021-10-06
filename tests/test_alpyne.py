@@ -1,15 +1,15 @@
 #!/usr/bin/env python
 
-"""Tests for `alpyne` package."""
+"""Tests for `alpyen` package."""
 
 import pytest
 import statistics
 
 from click.testing import CliRunner
 
-from alPyne import datacontainer
-from alPyne import backtesting
-from alPyne import cli
+from alpyen import datacontainer
+from alpyen import backtesting
+from alpyen import cli
 
 
 @pytest.fixture
@@ -33,7 +33,7 @@ def test_command_line_interface():
     runner = CliRunner()
     result = runner.invoke(cli.main)
     assert result.exit_code == 0
-    assert 'alpyne.cli.main' in result.output
+    assert 'alpyen.cli.main' in result.output
     help_result = runner.invoke(cli.main, ['--help'])
     assert help_result.exit_code == 0
     assert '--help  Show this message and exit.' in help_result.output

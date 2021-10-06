@@ -1,1 +1,1 @@
-"""Unit test package for alpyne."""
+"""Unit test package for alpyen."""

@@ -2,6 +2,6 @@
 Usage
 =====
 
-To use alPyne in a project::
+To use alpyen in a project::
 
-    import alpyne
+    import alpyen
