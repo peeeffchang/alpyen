@@ -23,6 +23,30 @@ Python based algo trading platform for IB.
 * Free software: GNU General Public License v3
 * Documentation: https://alpyen.readthedocs.io.
 
+Features
+--------
+
+Providing a trading platform for IB that includes the functions of
+
+* Data gathering
+* Algo signal calculation
+* Automatic trading
+* Book management
+
+Current Version
+---------------
+Able to perform backtesting. Live trading support in development.
+
+Next Release
+------------
+Improve new signal class and strategy class reflection/registration.
+
+Support This Project
+--------------------
+* Use and discuss us
+* Report a bug
+* Submit a bug fix
+
 Installation
 ------------
 ::
@@ -67,25 +91,6 @@ Example
     
 The moving average signal and the MA-crossing trading strategy are intended to serve as examples. Users can use them as references and create their custom signals/strategies by deriving from the ``SignalBase`` class within the ``signal`` module, and the ``StrategyBase`` class within the ``strategy`` module.
 
-Features
---------
-
-Providing a trading platform for IB that includes the functions of
-
-* Data gathering
-* Algo signal calculation
-* Automatic trading
-* Book management
-
-Current Version
----------------
-Able to perform backtesting. Live trading support in development.
-
-Support This Project
---------------------
-* Use and discuss us
-* Report a bug
-* Submit a bug fix
 
 Credits
 -------
