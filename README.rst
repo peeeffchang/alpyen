@@ -13,7 +13,8 @@ alpyen
         :target: https://alpyen.readthedocs.io/en/latest/?version=latest
         :alt: Documentation Status
 
-
+.. image:: https://pepy.tech/badge/alpyen
+        :target: https://pepy.tech/project/alpyen
 
 
 Python based algo trading platform for IB.
