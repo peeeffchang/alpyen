@@ -17,7 +17,7 @@ alpyen
         :target: https://pepy.tech/project/alpyen
 
 
-Python based algo trading platform for IB.
+A lite-weight backtesting and live-trading algo engine for IB (Interactive Brokers) and other brokers.
 
 
 * Free software: GNU General Public License v3
