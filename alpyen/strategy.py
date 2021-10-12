@@ -53,18 +53,38 @@ class StrategyBase(ABC):
     """
     CASH_ACCOUNT_NAME = 'cash_account'
 
-    def __init__(self,
-                 input_signal_array: List[Event],
-                 trade_combo: TradeCombos,
-                 warmup_length: int,
-                 strategy_name: str,
-                 initial_capital: float = 100.0,
-                 order_manager: brokerinterface.OrderManager = None) -> None:
+    _strategy_classes_registry = {}
+
+    _strategy_signature = None
+
+    @classmethod
+    def __init_subclass__(cls, **kwargs):
+        super().__init_subclass__(**kwargs)
+        if cls._strategy_signature is None:
+            raise KeyError('StrategyBase: Missing signature for ' + str(cls))
+        elif cls._strategy_signature in cls._strategy_classes_registry:
+            raise KeyError('StrategyBase: Conflict in signature ' + cls._strategy_signature)
+        else:
+            cls._strategy_classes_registry[cls._strategy_signature] = cls
+
+    @classmethod
+    def get_class_registry(cls):
+        return cls._strategy_classes_registry
+
+    def __new__(cls,
+                signature_str: str,
+                input_signal_array: List[Event],
+                trade_combo: TradeCombos,
+                warmup_length: int,
+                initial_capital: float = 100.0,
+                order_manager: brokerinterface.OrderManager = None):
         """
-        Initialize strategy base.
+        Create derived strategy object.
 
         Parameters
         ----------
+        signature_str: str
+            Unique signature of the strategy.
         input_signal_array: List[Event]
             List of event subscription that is required for trade decision.
         trade_combo: TradeCombos
@@ -72,46 +92,59 @@ class StrategyBase(ABC):
             all trades from this strategy will be under a generic combo.
         warmup_length: int
             Number of data points to 'burn'
-        strategy_name: str
-            Name of the strategy
         initial_capital: float
             Initial capital.
         order_manager: OrderManager
             OrderManager object for live trading.
         """
-        # TBD: Use pandas df to store some of the member fields
-        self._strategy_name = strategy_name
-        self._warmup_length = warmup_length
-        self._mtm = initial_capital
-        if order_manager is None:
-            self._is_live_trading = False
-        else:
-            self._is_live_trading = True
-            self._order_manager = order_manager
+        if signature_str not in cls.get_class_registry():
+            raise ValueError('StrategyBase.__new__: ' + signature_str + ' is not a valid key.')
 
-        self._strategy_active = True  # A strategy is active by default
-        self._initialize_signal_time_storage(input_signal_array)
-        contract_array = trade_combo.get_contract_array()
-        self._contract_array = contract_array
-        if not trade_combo.get_combo_def() is None:
-            self._combo_def = trade_combo.get_combo_def()
+        my_strategy_obj = super().__new__(cls.get_class_registry()[signature_str])
+
+        # TBD: Use pandas df to store some of the member fields
+        my_strategy_obj._warmup_length = warmup_length
+        my_strategy_obj._mtm = initial_capital
+        if order_manager is None:
+            my_strategy_obj._is_live_trading = False
         else:
-            self._combo_def = None
-        self._initialize_contract_time_storage(contract_array)
-        self._input_signal_array = input_signal_array
+            my_strategy_obj._is_live_trading = True
+            my_strategy_obj._order_manager = order_manager
+
+        my_strategy_obj._strategy_active = True  # A strategy is active by default
+        my_strategy_obj._initialize_signal_time_storage(input_signal_array)
+        contract_array = trade_combo.get_contract_array()
+        my_strategy_obj._contract_array = contract_array
+        if not trade_combo.get_combo_def() is None:
+            my_strategy_obj._combo_def = trade_combo.get_combo_def()
+        else:
+            my_strategy_obj._combo_def = None
+        my_strategy_obj._initialize_contract_time_storage(contract_array)
+        my_strategy_obj._input_signal_array = input_signal_array
 
         position_temp = {security.name(): 0.0 for security in contract_array}
         # Remember to add cash account
-        position_temp[self.CASH_ACCOUNT_NAME] = initial_capital
-        self._contract_positions = position_temp
+        position_temp[my_strategy_obj.CASH_ACCOUNT_NAME] = initial_capital
+        my_strategy_obj._contract_positions = position_temp
 
-        self._combo_positions = {combo_name: 0.0 for combo_name in self._combo_def.keys()}
+        my_strategy_obj._combo_positions = {combo_name: 0.0 for combo_name in my_strategy_obj._combo_def.keys()}
 
-        self._combo_order = {combo_name: 0.0 for combo_name in self._combo_def.keys()}
-        self._average_entry_price = {security.name(): 0.0 for security in contract_array}
-        self._mtm_price = {security.name(): 0.0 for security in contract_array}
+        my_strategy_obj._combo_order = {combo_name: 0.0 for combo_name in my_strategy_obj._combo_def.keys()}
+        my_strategy_obj._average_entry_price = {security.name(): 0.0 for security in contract_array}
+        my_strategy_obj._mtm_price = {security.name(): 0.0 for security in contract_array}
 
-        self._mtm_history = [initial_capital]
+        my_strategy_obj._mtm_history = [initial_capital]
+
+        return my_strategy_obj
+
+    def __init__(self,
+                 signature_str: str,
+                 input_signal_array: List[Event],
+                 trade_combo: TradeCombos,
+                 warmup_length: int,
+                 initial_capital: float = 100.0,
+                 order_manager: brokerinterface.OrderManager = None) -> None:
+        pass
 
     def _initialize_signal_time_storage(self, input_signal_array: List[Event]) -> None:
         """
@@ -420,16 +453,22 @@ class MACrossingStrategy(StrategyBase):
     MA Crossing Strategy
     """
 
+    _strategy_signature = 'MACrossing'
+
     def __init__(self,
+                 signature_str: str,
                  input_signal_array: List[Event],
                  trade_combo: TradeCombos,
                  warmup_length: int,
+                 initial_capital: float = 100.0,
                  order_manager: brokerinterface.OrderManager = None) -> None:
         """
         Initialize MA Crossing Strategy.
 
         Parameters
         ----------
+        signature_str: str
+            Unique signature of the strategy.
         input_signal_array: List[Event]
             List of event subscription that is required for trade decision.
         trade_combo: TradeCombos
@@ -437,13 +476,14 @@ class MACrossingStrategy(StrategyBase):
             all trades from this strategy will be under a generic combo.
         warmup_length: int
             Number of data points to 'burn'
+        initial_capital: float
+            Initial capital.
         order_manager: OrderManager
             OrderManager object for live trading.
         """
         if len(trade_combo.get_combo_def()) != 1:
             raise ValueError('MACrossingStrategy.__init__: Too many combos specified.')
-        super().__init__(input_signal_array, trade_combo, warmup_length, input_signal_array[0].name()
-                         + "_MACrossing", order_manager=order_manager)
+        self._strategy_name = input_signal_array[0].name() + "_MACrossing"
         self._long_signal_name, self._short_signal_name = self._deduce_signal_name(input_signal_array)
 
     def _deduce_signal_name(self, input_signal_array: List[Event]) -> (str, str):

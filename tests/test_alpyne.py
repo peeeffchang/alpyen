@@ -51,15 +51,16 @@ def test_backtesting_macrossing():
     # Subscribe to signals
     signal_info_dict = {}
     signal_info_dict[ticker_name + '_MA_' + str(short_lookback)]\
-        = backtesting.SignalInfo(ticker_names, [short_lookback])
+        = backtesting.SignalInfo(ticker_names, [short_lookback], 'MA')
     signal_info_dict[ticker_name + '_MA_' + str(long_lookback)]\
-        = backtesting.SignalInfo(ticker_names, [long_lookback])
+        = backtesting.SignalInfo(ticker_names, [long_lookback], 'MA')
 
     # Subscribe to strategies
     strategy_info_dict = {}
     strategy_name = ticker_name + '_MACrossing_01'
     strategy_info_dict[strategy_name] = backtesting.StrategyInfo(
-        [ticker_name + '_MA_' + str(short_lookback), ticker_name + '_MA_' + str(long_lookback)], [1], [ticker_name])
+        [ticker_name + '_MA_' + str(short_lookback), ticker_name + '_MA_' + str(long_lookback)],
+        [1], [ticker_name], 'MACrossing')
 
     # Create backtester
     number_path = 1000
