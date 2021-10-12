@@ -6,9 +6,6 @@ alpyen
 .. image:: https://img.shields.io/pypi/v/alpyen.svg
         :target: https://pypi.python.org/pypi/alpyen
 
-.. image:: https://img.shields.io/travis/peeeffchang/alpyen.svg
-        :target: https://travis-ci.com/peeeffchang/alpyen
-
 .. image:: https://readthedocs.org/projects/alpyen/badge/?version=latest
         :target: https://alpyen.readthedocs.io/en/latest/?version=latest
         :alt: Documentation Status
