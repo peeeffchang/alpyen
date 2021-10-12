@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 from collections import deque
 from datetime import timedelta
 from eventkit import Event
-from typing import List, Deque, Dict
+from typing import List, Deque
 
 from . import datacontainer
 
@@ -12,27 +12,58 @@ class SignalBase(ABC):
     Base class for signal.
     """
 
-    def __init__(self,
-                 input_data_array: List[Event],
-                 warmup_length: int,
-                 signal_name: str) -> None:
+    _signal_classes_registry = {}
+
+    _signal_signature = None
+
+    @classmethod
+    def __init_subclass__(cls, **kwargs):
+        super().__init_subclass__(**kwargs)
+        if cls._signal_signature is None:
+            raise KeyError('SignalBase: Missing signature for ' + str(cls))
+        elif cls._signal_signature in cls._signal_classes_registry:
+            raise KeyError('SignalBase: Conflict in signature ' + cls._signal_signature)
+        else:
+            cls._signal_classes_registry[cls._signal_signature] = cls
+
+    @classmethod
+    def get_class_registry(cls):
+        return cls._signal_classes_registry
+
+    def __new__(cls,
+                signature_str: str,
+                input_data_array: List[Event],
+                warmup_length: int):
         """
-        Initialize signal base.
+        Create derived signal object.
 
         Parameters
         ----------
+        signature_str: str
+            Unique signature of the signal.
         input_data_array: List[Event]
             List of event subscription that is required for signal calculation.
         warmup_length: int
-            Number of data points to 'burn'
-        signal_name: str
-            Name of the signal.
+            Number of data points to 'burn'.
         """
-        self._input_data_array = input_data_array
-        self._signal_name = signal_name
-        self._warmup_length = warmup_length
-        self._signal_event = Event(signal_name)
-        self._initialize_data_time_storage(input_data_array)
+        if signature_str not in cls.get_class_registry():
+            raise ValueError('SignalBase.__new__: ' + signature_str + ' is not a valid key.')
+
+        my_signal_obj = super().__new__(cls.get_class_registry()[signature_str])
+
+        # Initialization
+        my_signal_obj._input_data_array = input_data_array
+        my_signal_obj._warmup_length = warmup_length
+        my_signal_obj._initialize_data_time_storage(input_data_array)
+        my_signal_obj._signature_str = signature_str
+
+        return my_signal_obj
+
+    def __init__(self,
+                 signature_str: str,
+                 input_data_array: List[Event],
+                 warmup_length: int) -> None:
+        pass
 
     def _initialize_data_time_storage(self, input_data_array: List[Event]) -> None:
         """
@@ -118,10 +149,14 @@ class MASignal(SignalBase):
     Moving average signal.
     """
 
+    _signal_signature = 'MA'
+
     def __init__(self,
+                 signature_str: str,
                  input_data_array: List[Event],
                  warmup_length: int) -> None:
-        super().__init__(input_data_array, warmup_length, input_data_array[0].name() + "_MA_" + str(warmup_length))
+        self._signal_name = input_data_array[0].name() + "_MA_" + str(warmup_length)
+        self._signal_event = Event(self._signal_name)
 
     def calculate_signal(self) -> float:
         """
@@ -135,10 +170,16 @@ class WMomSignal(SignalBase):
     """
     Weighted momentum signal.
     """
+
+    _signal_signature = 'WM'
+
     def __init__(self,
+                 signature_str: str,
                  input_data_array: List[Event],
                  warmup_length: int) -> None:
-        super().__init__(input_data_array, warmup_length, input_data_array[0].name() + "_WM")
+        all_input_names = [x.name() for x in input_data_array]
+        self._signal_name = ''.join(all_input_names) + "_" + self._signal_signature + "_"
+        self._signal_event = Event(self._signal_name)
         # Constants
         self._trading_days_in_month = 21
         self._normalization_factor = 4.0
