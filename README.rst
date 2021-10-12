@@ -39,7 +39,7 @@ Able to perform backtesting. Live trading support in development.
 
 Next Release
 ------------
-Improve new signal class and strategy class reflection/registration.
+Live trading support.
 
 Support This Project
 --------------------
@@ -72,15 +72,16 @@ Example
     # Subscribe to signals
     signal_info_dict = {}
     signal_info_dict[ticker_name + '_MA_' + str(short_lookback)]\
-        = backtesting.SignalInfo(ticker_names, [short_lookback])
+        = backtesting.SignalInfo(ticker_names, [short_lookback], 'MA')
     signal_info_dict[ticker_name + '_MA_' + str(long_lookback)]\
-        = backtesting.SignalInfo(ticker_names, [long_lookback])
+        = backtesting.SignalInfo(ticker_names, [long_lookback], 'MA')
 
     # Subscribe to strategies
     strategy_info_dict = {}
     strategy_name = ticker_name + '_MACrossing_01'
     strategy_info_dict[strategy_name] = backtesting.StrategyInfo(
-        [ticker_name + '_MA_' + str(short_lookback), ticker_name + '_MA_' + str(long_lookback)], [1], [ticker_name])
+        [ticker_name + '_MA_' + str(short_lookback), ticker_name + '_MA_' + str(long_lookback)],
+        [1], [ticker_name], 'MACrossing')
 
     # Create backtester and run backtest
     number_path = 1000
@@ -89,8 +90,23 @@ Example
     my_backtester.run_backtest()
     backtest_results = my_backtester.get_results()
     
-The moving average signal and the MA-crossing trading strategy are intended to serve as examples. Users can use them as references and create their custom signals/strategies by deriving from the ``SignalBase`` class within the ``signal`` module, and the ``StrategyBase`` class within the ``strategy`` module.
+The moving average signal and the MA-crossing trading strategy are intended to serve as examples. Users can use them as references and create their custom signals/strategies by deriving from the ``SignalBase`` class within the ``signal`` module, and the ``StrategyBase`` class within the ``strategy`` module. Note that the package needs a unique signature string for each derived signals/strategies for reflective object creation, so for example:
 
+.. code-block:: python
+
+    class MASignal(SignalBase):
+        """
+        Moving average signal.
+        """
+
+        _signal_signature = 'MA'
+        
+    class MACrossingStrategy(StrategyBase):
+        """
+        MA Crossing Strategy
+        """
+
+        _strategy_signature = 'MACrossing'
 
 Credits
 -------
