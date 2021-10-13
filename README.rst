@@ -15,6 +15,9 @@ alpyen
 
 .. image:: https://pepy.tech/badge/alpyen
         :target: https://pepy.tech/project/alpyen
+        
+.. image:: https://img.shields.io/github/repo-size/peeeffchang/alpyen   
+        :alt: GitHub repo size
 
 
 A lite-weight backtesting and live-trading algo engine for IB (Interactive Brokers) and other brokers.
