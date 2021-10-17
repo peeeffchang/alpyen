@@ -177,8 +177,7 @@ class WMomSignal(SignalBase):
                  signature_str: str,
                  input_data_array: List[Event],
                  warmup_length: int) -> None:
-        all_input_names = [x.name() for x in input_data_array]
-        self._signal_name = ''.join(all_input_names) + "_" + self._signal_signature + "_"
+        self._signal_name = input_data_array[0].name() + "_WM"
         self._signal_event = Event(self._signal_name)
         # Constants
         self._trading_days_in_month = 21

@@ -31,20 +31,20 @@ class SignalInfo:
     class for signal info.
     """
     def __init__(self,
+                 signal_signature: str,
                  input_names: List[str],
-                 params: List[float],
-                 signal_signature: str) -> None:
+                 params: List[float],) -> None:
         """
         Initialize signal info
 
         Parameters
         ----------
+        signal_signature: str
+            Unique signature of the signal.
         input_names: List[str]
             List of inputs the signal is listening to.
         params: List[float]
             List of parameters for calculating the signal.
-        signal_signature: str
-            Unique signature of the signal.
         """
         self._input_names = input_names
         self._params = params
@@ -65,37 +65,51 @@ class StrategyInfo:
     class for strategy info.
     """
     def __init__(self,
+                 strategy_signature: str,
                  input_names: List[str],
-                 params: List[float],
-                 combo_names: List[str],
-                 strategy_signature: str) -> None:
+                 warmup_length: int,
+                 custom_params: Dict,
+                 contract_names: List[str],
+                 combo_definition: Dict[str, List[float]] = None) -> None:
         """
         Initialize strategy info
 
         Parameters
         ----------
-        input_names: List[str]
-            List of inputs the strategy is listening to.
-        params: List[float]
-            List of parameters for executing the strategy.
-        combo_names: List[str]
-            Combo names the strategy is trading.
         strategy_signature: str
             Unique signature of the signal.
+        input_names: List[str]
+            List of inputs the strategy is listening to.
+        warmup_length: int
+            Number of data points to 'burn'
+        custom_params: Dict
+            Other strategy specific parameters.
+        contract_names: List[str]
+            Contract names for TradeCombos creation.
+        combo_definition: Dict[str, List[float]]
+            Weight dictionay for TradeCombos creation.
         """
         self._input_names = input_names
-        self._params = params
-        self._combo_names = combo_names
+        self._warmup_length = warmup_length
+        self._custom_params = custom_params
         self._strategy_signature = strategy_signature
+        self._contract_names = contract_names
+        self._combo_definition = combo_definition
 
     def get_input_names(self) -> List[str]:
         return self._input_names
 
-    def get_params(self) -> List[float]:
-        return self._params
+    def get_warmup_length(self) -> int:
+        return self._warmup_length
 
-    def get_combo_names(self) -> List[str]:
-        return self._combo_names
+    def get_custom_params(self) -> Dict:
+        return self._custom_params
+
+    def get_contract_names(self) -> List[str]:
+        return self._contract_names
+
+    def get_combo_definition(self) -> Dict[str, List[float]]:
+        return self._combo_definition
 
     def get_strategy_signature(self) -> str:
         return self._strategy_signature
@@ -228,15 +242,16 @@ class Backtester:
         strategy_info_dict: Dict[str, StrategyInfo] = self._strategy_info
         for k, v in strategy_info_dict.items():
             price_event_list: List[Event] = []
-            for i in range(len(v.get_combo_names())):
-                price_event_list.append(data_event_dict.get(v.get_combo_names()[i]))
+            for i in range(len(v.get_contract_names())):
+                price_event_list.append(data_event_dict.get(v.get_contract_names()[i]))
+            # Create TradeCombos
+            trade_combos = strategy.TradeCombos(price_event_list, v.get_combo_definition())
             # Create strategy
             signal_event_list: List[Event] = []
             for i in range(len(v.get_input_names())):
                 signal_event_list.append(signal_dict.get(v.get_input_names()[i]).get_signal_event())
-            macrossing_tc = strategy.TradeCombos(price_event_list, {'combo1': [1.0]})
             output_dict[k] = strategy.StrategyBase(v.get_strategy_signature(), signal_event_list,
-                                                   macrossing_tc, int(v.get_params()[0]))
+                                                   trade_combos, v.get_warmup_length(), **v.get_custom_params())
         return output_dict
 
     def generate_simulated_path(self,

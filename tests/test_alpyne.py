@@ -10,6 +10,7 @@ from click.testing import CliRunner
 from alpyen import datacontainer
 from alpyen import backtesting
 from alpyen import cli
+from alpyen import strategy
 
 
 @pytest.fixture
@@ -45,22 +46,25 @@ def test_backtesting_macrossing():
     ticker_name = 'BBH'
     short_lookback = 5
     long_lookback = 200
+    short_lookback_name = ticker_name + '_MA_' + str(short_lookback)
+    long_lookback_name = ticker_name + '_MA_' + str(long_lookback)
     ticker_names = [ticker_name]
     all_input = datacontainer.DataUtils.aggregate_yahoo_data(ticker_names, data_folder_path)
 
     # Subscribe to signals
     signal_info_dict = {}
-    signal_info_dict[ticker_name + '_MA_' + str(short_lookback)]\
-        = backtesting.SignalInfo(ticker_names, [short_lookback], 'MA')
-    signal_info_dict[ticker_name + '_MA_' + str(long_lookback)]\
-        = backtesting.SignalInfo(ticker_names, [long_lookback], 'MA')
+    signal_info_dict[short_lookback_name]\
+        = backtesting.SignalInfo('MA', ticker_names, [short_lookback])
+    signal_info_dict[long_lookback_name]\
+        = backtesting.SignalInfo('MA', ticker_names, [long_lookback])
 
     # Subscribe to strategies
     strategy_info_dict = {}
     strategy_name = ticker_name + '_MACrossing_01'
     strategy_info_dict[strategy_name] = backtesting.StrategyInfo(
-        [ticker_name + '_MA_' + str(short_lookback), ticker_name + '_MA_' + str(long_lookback)],
-        [1], [ticker_name], 'MACrossing')
+        'MACrossing',
+        [short_lookback_name, long_lookback_name],
+        1, {}, ticker_names, {'combo1': [1.0]})
 
     # Create backtester
     number_path = 1000
@@ -90,3 +94,54 @@ def test_backtesting_macrossing():
            == pytest.approx(0.865, 0.05)
     assert statistics.stdev(backtest_results[strategy_name][str(backtesting.MetricType.Return)])\
            == pytest.approx(0.326, 0.05)
+
+
+def test_backtesting_vaa():
+    # Read data
+    data_folder_path = 'Data\\'
+    ticker_names = ['VOO', 'VWO', 'VEA', 'BND', 'SHY', 'IEF', 'LQD']
+    all_input = datacontainer.DataUtils.aggregate_yahoo_data(ticker_names, data_folder_path)
+
+    # Subscribe to signals
+    signal_info_dict = {}
+    lookback = 253
+    for ticker in ticker_names:
+        signal_info_dict[ticker + '_WM_1'] = backtesting.SignalInfo('WM', [ticker], [lookback])
+
+    # Subscribe to strategies
+    strategy_info_dict = {}
+    strategy_name = '4ETF_VAA_01'
+    strategy_info_dict[strategy_name] = backtesting.StrategyInfo(
+        'VAA', [ticker + '_WM_1' for ticker in ticker_names],
+        1, {'risk_on_size': 4, 'num_assets_to_hold': 2,
+            'breadth_protection_threshold': 1, 'weighting_scheme': strategy.WeightingScheme.Equal},
+        ticker_names, {'combo1': [1.0] * len(ticker_names)})
+
+    # Create backtester
+    number_path = 1000
+    my_backtester = backtesting.Backtester(all_input, ticker_names, signal_info_dict, strategy_info_dict,
+                                           number_path)
+    my_backtester.run_backtest()
+    backtest_results = my_backtester.get_results()
+
+    # Check
+    # Actual historical path
+    assert backtest_results[strategy_name][str(backtesting.MetricType.PoorMansSharpeRatio)][0]\
+           == pytest.approx(0.08549, 0.0001)
+    assert backtest_results[strategy_name][str(backtesting.MetricType.MaximumDrawDown)][0]\
+           == pytest.approx(0.08114, 0.0001)
+    assert backtest_results[strategy_name][str(backtesting.MetricType.Return)][0]\
+           == pytest.approx(1.01538, 0.0001)
+    # All (including simulated) paths
+    assert statistics.mean(backtest_results[strategy_name][str(backtesting.MetricType.PoorMansSharpeRatio)])\
+           == pytest.approx(0.03377, 0.05)
+    assert statistics.stdev(backtest_results[strategy_name][str(backtesting.MetricType.PoorMansSharpeRatio)])\
+           == pytest.approx(0.01799, 0.05)
+    assert statistics.mean(backtest_results[strategy_name][str(backtesting.MetricType.MaximumDrawDown)])\
+           == pytest.approx(0.13297, 0.05)
+    assert statistics.stdev(backtest_results[strategy_name][str(backtesting.MetricType.MaximumDrawDown)])\
+           == pytest.approx(0.047857, 0.05)
+    assert statistics.mean(backtest_results[strategy_name][str(backtesting.MetricType.Return)])\
+           == pytest.approx(0.3629, 0.05)
+    assert statistics.stdev(backtest_results[strategy_name][str(backtesting.MetricType.Return)])\
+           == pytest.approx(0.2243, 0.05)
