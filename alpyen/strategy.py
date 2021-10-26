@@ -85,7 +85,7 @@ class StrategyBase(ABC):
                 trade_combo: TradeCombos,
                 warmup_length: int,
                 initial_capital: float = 100.0,
-                order_manager: brokerinterface.OrderManager = None,
+                order_manager: brokerinterface.OrderManagerBase = None,
                 **kwargs):
         """
         Create derived strategy object.
@@ -152,7 +152,7 @@ class StrategyBase(ABC):
                  trade_combo: TradeCombos,
                  warmup_length: int,
                  initial_capital: float = 100.0,
-                 order_manager: brokerinterface.OrderManager = None) -> None:
+                 order_manager: brokerinterface.OrderManagerBase = None) -> None:
         pass
 
     def _initialize_signal_time_storage(self, input_signal_array: List[Event]) -> None:
@@ -353,14 +353,21 @@ class StrategyBase(ABC):
         """
         Send pending orders to broker.
         """
-        pass
-
-    #         self._order_manager.place_order(self._strategy_name,
-    #                                        self._contract_array,
-    #                                        )
-    #                     weight_array: List[float],
-    #                     combo_unit: float,
-    #                     combo_name: str
+        contract_array = [self._order_manager.get_event_contract_dict[i.name()] for i in self._contract_array]
+        for combo_name, amount in self._combo_order.items():
+            if combo_name in self._combo_def:
+                combo_def = self._combo_def[combo_name]
+                self._order_manager.place_order(self._strategy_name,
+                                                contract_array,
+                                                combo_def,
+                                                amount,
+                                                combo_name)
+            else:
+                # Some strategies do not have predefined combos;
+                # for them we simply place orders for individual contract.
+                raise ValueError('StrategyBase.send_order_live: Non-combo ordering not implemented yet.')
+    # % Record entered combo position locally
+    # obj.positionArr{1, comboId} = obj.positionArr{1, comboId} + comboUnit;
 
     def _calculate_new_average_entry_price(self,
                                            old_average_entry_price: float,
@@ -488,7 +495,7 @@ class MACrossingStrategy(StrategyBase):
                  trade_combo: TradeCombos,
                  warmup_length: int,
                  initial_capital: float = 100.0,
-                 order_manager: brokerinterface.OrderManager = None) -> None:
+                 order_manager: brokerinterface.OrderManagerBase = None) -> None:
         """
         Initialize MA Crossing Strategy.
 
@@ -576,7 +583,7 @@ class VAAStrategy(StrategyBase):
                  trade_combo: TradeCombos,
                  warmup_length: int,
                  initial_capital: float = 100.0,
-                 order_manager: brokerinterface.OrderManager = None,
+                 order_manager: brokerinterface.OrderManagerBase = None,
                  **kwargs) -> None:
         """
         Initialize VAA rotation Strategy.
