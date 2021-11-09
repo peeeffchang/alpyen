@@ -4,7 +4,7 @@ from datetime import timedelta
 import enum
 from eventkit import Event
 import math
-from typing import List, Deque, Dict, Tuple
+from typing import List, Deque, Dict
 
 from . import brokerinterface
 from . import datacontainer
@@ -353,15 +353,20 @@ class StrategyBase(ABC):
         """
         Send pending orders to broker.
         """
-        contract_array = [self._order_manager.get_event_contract_dict[i.name()] for i in self._contract_array]
+        contract_array = [self._order_manager.get_event_contract_dict()[i.name()] for i in self._contract_array]
         for combo_name, amount in self._combo_order.items():
             if combo_name in self._combo_def:
                 combo_def = self._combo_def[combo_name]
-                self._order_manager.place_order(self._strategy_name,
-                                                contract_array,
-                                                combo_def,
-                                                amount,
-                                                combo_name)
+                self._order_manager.register_combo_level_info(self._strategy_name,
+                                                              contract_array,
+                                                              combo_def,
+                                                              combo_name)
+                for i in range(len(combo_def)):
+                    self._order_manager.place_order(self._strategy_name,
+                                                    combo_name,
+                                                    i,
+                                                    contract_array[i],
+                                                    amount)
             else:
                 # Some strategies do not have predefined combos;
                 # for them we simply place orders for individual contract.
@@ -702,17 +707,17 @@ class VAAStrategy(StrategyBase):
         return output
 
     def calculate_weight(self,
-                         top_performers: List[Tuple[str, Deque[float]]],
-                         top_risk_off_performer: Tuple[str, Deque[float]],
+                         top_performers: List[str],
+                         top_risk_off_performer: str,
                          rounded_cash_fraction: float) -> Dict[str, float]:
         """
         Calculate the weight to trade.
 
         Parameters
         ----------
-        top_performers: List[Tuple[str, Deque[float]]]
+        top_performers: List[str]
             Top risk-on performers' performances.
-        top_risk_off_performer: Tuple[str, Deque[float]]
+        top_risk_off_performer: str
             Top risk-off performer's performance.
         rounded_cash_fraction: float
             Rounded fraction to be held in cash.

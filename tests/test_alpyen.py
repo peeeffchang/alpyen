@@ -145,3 +145,44 @@ def test_backtesting_vaa():
            == pytest.approx(0.3629, 0.05)
     assert statistics.stdev(backtest_results[strategy_name][str(backtesting.MetricType.Return)])\
            == pytest.approx(0.2243, 0.05)
+
+from alpyen import brokerinterface
+from alpyen import signal
+
+def test_backtesting_live():
+    ib_api = brokerinterface.IBBrokerAPI()
+    ib_api.connect(port=4002)
+
+    # Contract
+    input_data_name = 'EURUSD'
+    eurusd_contract = brokerinterface.IBBrokerAPI.IBBrokerContract(brokerinterface.ContractType.FX,
+                                                          input_data_name)
+
+    # Broker relay
+    eurusd_bar_relay = brokerinterface.IBBrokerAPI.IBBrokerEventRelay(input_data_name)
+
+    # Signals
+    ma_signal_short = signal.SignalBase('MA', [eurusd_bar_relay.get_event()], 2)
+    ma_signal_long = signal.SignalBase('MA', [eurusd_bar_relay.get_event()], 3)
+
+    eurusd_ma_dataslot = signal.DataSlot(input_data_name, [ma_signal_short, ma_signal_short])
+
+    # Subscription
+    live_bars = ib_api.request_live_bars(eurusd_contract, brokerinterface.PriceDataType.Mid)
+
+    # Create signals
+    eurusd_data = signal.DataSlot(input_data_name, [ma_signal_short, ma_signal_long])
+    ber = brokerinterface.IBBrokerAPI.IBBrokerEventRelay(input_data_name, 'close')
+
+    live_bars.updateEvent += ber.live_bar
+
+    # Create strategy
+    trade_combos = strategy.TradeCombos([ber.get_event()], {'combo1': [1.0]})
+    order_manager = brokerinterface.OrderManager(ib_api)
+
+    macrossing_strategy = strategy.MACrossingStrategy(
+        'MACrossing',
+        [ma_signal_short.get_signal_event(), ma_signal_long.get_signal_event()],
+        trade_combos, 1, order_manager=order_manager)
+
+    ib_api.get_handle().sleep(200)
