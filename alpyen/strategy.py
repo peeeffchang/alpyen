@@ -4,7 +4,8 @@ from datetime import timedelta
 import enum
 from eventkit import Event
 import math
-from typing import List, Deque, Dict, Tuple
+import pandas as pd
+from typing import List, Deque, Dict
 
 from . import brokerinterface
 from . import datacontainer
@@ -85,7 +86,7 @@ class StrategyBase(ABC):
                 trade_combo: TradeCombos,
                 warmup_length: int,
                 initial_capital: float = 100.0,
-                order_manager: brokerinterface.OrderManager = None,
+                order_manager: brokerinterface.OrderManagerBase = None,
                 **kwargs):
         """
         Create derived strategy object.
@@ -152,7 +153,7 @@ class StrategyBase(ABC):
                  trade_combo: TradeCombos,
                  warmup_length: int,
                  initial_capital: float = 100.0,
-                 order_manager: brokerinterface.OrderManager = None) -> None:
+                 order_manager: brokerinterface.OrderManagerBase = None) -> None:
         pass
 
     def _initialize_signal_time_storage(self, input_signal_array: List[Event]) -> None:
@@ -272,12 +273,38 @@ class StrategyBase(ABC):
         self.get_contract_time_by_name(new_data.get_name()).append(new_data.get_time())
         if len(self.get_contract_time_by_name(new_data.get_name())) > 1:
             self.get_contract_time_by_name(new_data.get_name()).popleft()
+        # Update PM combo mtm price
+        if self._is_live_trading:
+            # Build a dataframe
+            combo_mtm = pd.DataFrame(columns=['strategy_name', 'combo_name', 'combo_mtm_price'])
+            for combo_name in self._combo_def.keys():
+                combo_mtm = combo_mtm.append({'strategy_name': self._strategy_name,
+                                              'combo_name': combo_name,
+                                              'combo_mtm_price': self.get_combo_mtm_price(combo_name)},
+                                             ignore_index=True)
+            # Update
+            self._order_manager.get_portfolio_manager().update_combo_mtm_price(combo_mtm)
+        pass
 
     def get_mtm_history(self) -> List[float]:
         return self._mtm_history
 
     def get_mtm_price_by_name(self, data_name: str) -> float:
+        """Return the MTM price of a contract."""
         return self._mtm_price[data_name]
+
+    def get_combo_mtm_price(self, combo_name: str) -> float:
+        """
+        Retrieve combo mtm price.
+
+
+        Parameters
+        ----------
+        combo_name: str
+            Combo name.
+        """
+        combo_def = self._combo_def[combo_name]
+        return sum(i[0] * i[1] for i in zip(combo_def, self._mtm_price.values()))
 
     def get_contract_time_by_name(self, data_name: str) -> Deque:
         return self._contract_time_storage[data_name]
@@ -353,14 +380,26 @@ class StrategyBase(ABC):
         """
         Send pending orders to broker.
         """
-        pass
-
-    #         self._order_manager.place_order(self._strategy_name,
-    #                                        self._contract_array,
-    #                                        )
-    #                     weight_array: List[float],
-    #                     combo_unit: float,
-    #                     combo_name: str
+        contract_array = [self._order_manager.get_event_contract_dict()[i.name()] for i in self._contract_array]
+        for combo_name, amount in self._combo_order.items():
+            if combo_name in self._combo_def:
+                combo_def = self._combo_def[combo_name]
+                self._order_manager.register_combo_level_info(self._strategy_name,
+                                                              contract_array,
+                                                              combo_def,
+                                                              combo_name)
+                for i in range(len(combo_def)):
+                    self._order_manager.place_order(self._strategy_name,
+                                                    combo_name,
+                                                    i,
+                                                    contract_array[i],
+                                                    amount)
+            else:
+                # Some strategies do not have predefined combos;
+                # for them we simply place orders for individual contract.
+                raise ValueError('StrategyBase.send_order_live: Non-combo ordering not implemented yet.')
+    # % Record entered combo position locally
+    # obj.positionArr{1, comboId} = obj.positionArr{1, comboId} + comboUnit;
 
     def _calculate_new_average_entry_price(self,
                                            old_average_entry_price: float,
@@ -415,19 +454,6 @@ class StrategyBase(ABC):
             Latest MTM.
         """
         self._mtm_history.append(new_mtm)
-
-    def get_combo_mtm_price(self, combo_name: str) -> float:
-        """
-        Retrieve combo mtm price.
-
-
-        Parameters
-        ----------
-        combo_name: str
-            Combo name.
-        """
-        combo_def = self._combo_def[combo_name]
-        return sum(i[0] * i[1] for i in zip(combo_def, self._mtm_price.values()))
 
     def has_pending_order(self) -> bool:
         """
@@ -488,7 +514,7 @@ class MACrossingStrategy(StrategyBase):
                  trade_combo: TradeCombos,
                  warmup_length: int,
                  initial_capital: float = 100.0,
-                 order_manager: brokerinterface.OrderManager = None) -> None:
+                 order_manager: brokerinterface.OrderManagerBase = None) -> None:
         """
         Initialize MA Crossing Strategy.
 
@@ -576,7 +602,7 @@ class VAAStrategy(StrategyBase):
                  trade_combo: TradeCombos,
                  warmup_length: int,
                  initial_capital: float = 100.0,
-                 order_manager: brokerinterface.OrderManager = None,
+                 order_manager: brokerinterface.OrderManagerBase = None,
                  **kwargs) -> None:
         """
         Initialize VAA rotation Strategy.
@@ -695,17 +721,17 @@ class VAAStrategy(StrategyBase):
         return output
 
     def calculate_weight(self,
-                         top_performers: List[Tuple[str, Deque[float]]],
-                         top_risk_off_performer: Tuple[str, Deque[float]],
+                         top_performers: List[str],
+                         top_risk_off_performer: str,
                          rounded_cash_fraction: float) -> Dict[str, float]:
         """
         Calculate the weight to trade.
 
         Parameters
         ----------
-        top_performers: List[Tuple[str, Deque[float]]]
+        top_performers: List[str]
             Top risk-on performers' performances.
-        top_risk_off_performer: Tuple[str, Deque[float]]
+        top_risk_off_performer: str
             Top risk-off performer's performance.
         rounded_cash_fraction: float
             Rounded fraction to be held in cash.
