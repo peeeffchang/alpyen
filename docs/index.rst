@@ -19,6 +19,15 @@ Welcome to alpyen's documentation!
 .. automodule:: alpyen.strategy
    :members:
    :undoc-members:
+.. automodule:: alpyen.backtesting
+   :members:
+   :undoc-members:
+.. automodule:: alpyen.brokerinterface
+   :members:
+   :undoc-members:
+.. automodule:: alpyen.livetrading
+   :members:
+   :undoc-members:
 
 Indices and tables
 ==================
