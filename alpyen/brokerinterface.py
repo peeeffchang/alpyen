@@ -245,8 +245,20 @@ class PortfolioManagerBase:
         # Create dataframes for storing information
         self.portfolio_info_df = pd.DataFrame(columns=['strategy_name', 'combo_name',
                                                        'combo_position', 'combo_entry_price',
-                                                       'realized_pnl'])
+                                                       'combo_mtm_price', 'realized_pnl'])
         self.contract_info_df = pd.DataFrame(columns=['symbol', 'type', 'exchange', 'currency', 'position'])
+
+    def update_combo_mtm_price(self, combo_mtm: pd.DataFrame):
+        """
+        Update the combo MTM price.
+
+        Parameters
+        ----------
+        combo_mtm: pd.DataFrame
+            A dataframe with columns ['strategy_name', 'combo_name', 'combo_mtm_price'].
+        """
+        self.portfolio_info_df = pd.merge(self.portfolio_info_df, combo_mtm,
+                                          how="left", on=['strategy_name', 'combo_name'])
 
     @abstractmethod
     def update_portfolio(self, **kwargs) -> None:
@@ -440,6 +452,9 @@ class OrderManagerBase:
 
     def get_event_contract_dict(self):
         return self._event_contract_dict
+
+    def get_portfolio_manager(self):
+        return self._portfolio_manager
 
     @abstractmethod
     def place_order(self,

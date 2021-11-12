@@ -4,6 +4,7 @@ from datetime import timedelta
 import enum
 from eventkit import Event
 import math
+import pandas as pd
 from typing import List, Deque, Dict
 
 from . import brokerinterface
@@ -272,12 +273,38 @@ class StrategyBase(ABC):
         self.get_contract_time_by_name(new_data.get_name()).append(new_data.get_time())
         if len(self.get_contract_time_by_name(new_data.get_name())) > 1:
             self.get_contract_time_by_name(new_data.get_name()).popleft()
+        # Update PM combo mtm price
+        if self._is_live_trading:
+            # Build a dataframe
+            combo_mtm = pd.DataFrame(columns=['strategy_name', 'combo_name', 'combo_mtm_price'])
+            for combo_name in self._combo_def.keys():
+                combo_mtm = combo_mtm.append({'strategy_name': self._strategy_name,
+                                              'combo_name': combo_name,
+                                              'combo_mtm_price': self.get_combo_mtm_price(combo_name)},
+                                             ignore_index=True)
+            # Update
+            self._order_manager.get_portfolio_manager().update_combo_mtm_price(combo_mtm)
+        pass
 
     def get_mtm_history(self) -> List[float]:
         return self._mtm_history
 
     def get_mtm_price_by_name(self, data_name: str) -> float:
+        """Return the MTM price of a contract."""
         return self._mtm_price[data_name]
+
+    def get_combo_mtm_price(self, combo_name: str) -> float:
+        """
+        Retrieve combo mtm price.
+
+
+        Parameters
+        ----------
+        combo_name: str
+            Combo name.
+        """
+        combo_def = self._combo_def[combo_name]
+        return sum(i[0] * i[1] for i in zip(combo_def, self._mtm_price.values()))
 
     def get_contract_time_by_name(self, data_name: str) -> Deque:
         return self._contract_time_storage[data_name]
@@ -427,19 +454,6 @@ class StrategyBase(ABC):
             Latest MTM.
         """
         self._mtm_history.append(new_mtm)
-
-    def get_combo_mtm_price(self, combo_name: str) -> float:
-        """
-        Retrieve combo mtm price.
-
-
-        Parameters
-        ----------
-        combo_name: str
-            Combo name.
-        """
-        combo_def = self._combo_def[combo_name]
-        return sum(i[0] * i[1] for i in zip(combo_def, self._mtm_price.values()))
 
     def has_pending_order(self) -> bool:
         """
