@@ -5,17 +5,15 @@ alpyen
 
 .. image:: https://img.shields.io/pypi/v/alpyen.svg
         :target: https://pypi.python.org/pypi/alpyen
-
 .. image:: https://readthedocs.org/projects/alpyen/badge/?version=latest
         :target: https://alpyen.readthedocs.io/en/latest/?version=latest
         :alt: Documentation Status
-
 .. image:: https://pepy.tech/badge/alpyen
-        :target: https://pepy.tech/project/alpyen
-        
+        :target: https://pepy.tech/project/alpyen   
 .. image:: https://img.shields.io/github/repo-size/peeeffchang/alpyen   
-        :alt: GitHub repo size
-
+        :alt: GitHub repo size    
+.. image:: https://img.shields.io/pypi/pyversions/alpyen
+.. image:: https://img.shields.io/github/commit-activity/m/peeeffchang/alpyen
 
 A lite-weight backtesting and live-trading algo engine for IB (Interactive Brokers) and other brokers.
 
