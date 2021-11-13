@@ -8,11 +8,13 @@ jobs:
   run-unit-tests:
     runs-on: windows-latest
     steps:
-      - name: Check out code
-      - uses: actions/checkout@v2
-      - name: Set up node 
-      - uses: actions/setup-node@v1
-      - name: Install dependencies
-      - run: npm install
-      - name: Run tests 
-      - run: npm test
+    - name: Python Unit Test
+      # You may pin to the exact commit or the version.
+      # uses: onichandame/python-test-action@6a1d618300de7ea0b753e50819e093a7e5a5f60b
+      uses: onichandame/python-test-action@0.0.0
+      with:
+        # dependency list
+        deps_list: requirements_dev.txt
+        # path of git repo relative to GITHUB_WORKSPACE(no trailing slash)
+        path: .
+        test_dir: tests
