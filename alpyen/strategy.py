@@ -398,12 +398,11 @@ class StrategyBase(ABC):
                                                     i,
                                                     contract_array[i],
                                                     amount)
+                self._combo_positions[combo_name] += amount
             else:
                 # Some strategies do not have predefined combos;
                 # for them we simply place orders for individual contract.
                 raise ValueError('StrategyBase.send_order_live: Non-combo ordering not implemented yet.')
-    # % Record entered combo position locally
-    # obj.positionArr{1, comboId} = obj.positionArr{1, comboId} + comboUnit;
 
     def _calculate_new_average_entry_price(self,
                                            old_average_entry_price: float,

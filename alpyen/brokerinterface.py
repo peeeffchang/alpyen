@@ -260,8 +260,35 @@ class PortfolioManagerBase:
         self.portfolio_info_df = pd.merge(self.portfolio_info_df, combo_mtm,
                                           how="left", on=['strategy_name', 'combo_name'])
 
+    def get_combo_position(self,
+                           strategy_name: str,
+                           combo_name: str) -> float:
+        """
+        Return the current position of a specific combo.
+
+        Parameters
+        ----------
+        strategy_name: str
+            Name of the strategy
+        combo_name: str
+            Name of the combo. Each combo in a strategy should have a unique name.
+
+        Returns
+        -------
+            float
+                The combo position.
+        """
+        is_existing = ((self.portfolio_info_df['strategy_name'] == strategy_name) &
+                       (self.portfolio_info_df['combo_name'] == combo_name)).any()
+        if is_existing:
+            return (self.portfolio_info_df[(self.portfolio_info_df['strategy_name'] == strategy_name) &
+                                                           (self.portfolio_info_df['combo_name'] == combo_name)]
+                                                          ['combo_position'])
+        else:
+            return 0.0
+
     @abstractmethod
-    def update_portfolio(self, **kwargs) -> None:
+    def portfolio_update(self, **kwargs) -> None:
         pass
 
     @abstractmethod
@@ -294,7 +321,7 @@ class IBPortfolioManager(PortfolioManagerBase):
         """
         super().__init__(broker_api)
 
-    def update_portfolio(self, ) -> None:
+    def portfolio_update(self, ) -> None:
         pass
 
     def register_contract_trade(self,
@@ -583,17 +610,18 @@ class IBOrderManager(OrderManagerBase):
                                                             'contract_index': contract_index,
                                                             'combo_unit': unit,
                                                             'dangling_order': unit,
-                                                            'order_id': self._broker_handle.getReqId(),
+                                                            'order_id': self._broker_handle.client.getReqId(),
                                                             'is_outstanding': True},
                                                            ignore_index=True)
 
             order_notional = unit * self._combo_weight[(strategy_name, combo_name)][contract_index]
-            buy_sell: str = 'BUY' if order_notional > utils.EPSILON else 'SELL'
-            # TBD: Other order types
-            # TBD: Need re-writing with brokerinterface
-            ib_order = self._broker_handle.MarketOrder(buy_sell, order_notional)
-            trade_object = self._broker_handle.placeOrder(contract, ib_order)
-            trade_object.statusEvent += self.update_order_status
+            if abs(order_notional) > utils.EPSILON:
+                buy_sell: str = 'BUY' if order_notional > utils.EPSILON else 'SELL'
+                # TBD: Other order types
+                # TBD: Need re-writing with brokerinterface
+                ib_order = ibi.order.MarketOrder(buy_sell, order_notional)
+                trade_object = self._broker_handle.placeOrder(contract.get_contract(), ib_order)
+                trade_object.statusEvent += self.update_order_status
 
     def update_order_status(self,
                             trade: ibi.order.Trade) -> None:
