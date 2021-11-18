@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
 from collections import deque
 from datetime import timedelta
+from datetime import datetime
 import enum
 from eventkit import Event
 import math
@@ -392,12 +393,14 @@ class StrategyBase(ABC):
                                                               contract_array,
                                                               combo_def,
                                                               combo_name)
+                time_stamp = str(datetime.now())
                 for i in range(len(combo_def)):
                     self._order_manager.place_order(self._strategy_name,
                                                     combo_name,
                                                     i,
                                                     contract_array[i],
-                                                    amount)
+                                                    amount,
+                                                    time_stamp)
                 self._combo_positions[combo_name] += amount
             else:
                 # Some strategies do not have predefined combos;

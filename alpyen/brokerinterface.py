@@ -257,8 +257,19 @@ class PortfolioManagerBase:
         combo_mtm: pd.DataFrame
             A dataframe with columns ['strategy_name', 'combo_name', 'combo_mtm_price'].
         """
-        self.portfolio_info_df = pd.merge(self.portfolio_info_df, combo_mtm,
-                                          how="left", on=['strategy_name', 'combo_name'])
+        # for row in combo_mtm.values:
+        #     is_existing = ((self.portfolio_info_df['strategy_name'] == row[0]) &
+        #                    (self.portfolio_info_df['combo_name'] == row[1])).any()
+        #     if is_existing:
+        #         (self.portfolio_info_df[(self.portfolio_info_df['strategy_name'] == row[0]) &
+        #                                 (self.portfolio_info_df['combo_name'] == row[1])]
+        #                                ['combo_position']) = row[2]
+        #     else:
+
+        temp_df = pd.merge(self.portfolio_info_df, combo_mtm,
+                           how="left", on=['strategy_name', 'combo_name'])
+        self.portfolio_info_df['combo_mtm_price'] = temp_df['combo_mtm_price_y'].fillna(temp_df['combo_mtm_price_x'])
+        self.portfolio_info_df.drop(['combo_mtm_price_y', 'combo_mtm_price_x'], axis=1)
 
     def get_combo_position(self,
                            strategy_name: str,
@@ -286,6 +297,9 @@ class PortfolioManagerBase:
                                                           ['combo_position'])
         else:
             return 0.0
+
+    def get_portfolio_info(self) -> pd.DataFrame:
+        return self.portfolio_info_df
 
     @abstractmethod
     def portfolio_update(self, **kwargs) -> None:
@@ -430,6 +444,7 @@ class IBPortfolioManager(PortfolioManagerBase):
                                                                     'combo_name': combo_name,
                                                                     'combo_position': combo_unit,
                                                                     'combo_entry_price': combo_entry_price,
+                                                                    'combo_mtm_price': combo_entry_price,
                                                                     'realized_pnl': 0.0},
                                                                    ignore_index=True)
 
@@ -468,7 +483,7 @@ class OrderManagerBase:
         # Create dataframes for storing information
         self.order_info_df = pd.DataFrame(columns=['strategy_name', 'combo_name', 'contract_index',
                                                    'combo_unit', 'dangling_order', 'entry_price',
-                                                   'order_id', 'is_outstanding'])
+                                                   'order_id', 'time_stamp'])
 
         self._strategy_contracts: Dict[
             str, List[BrokerContractBase]] = {}  # A dictionary { strategy_name: contract_array }
@@ -489,7 +504,8 @@ class OrderManagerBase:
                     combo_name: str,
                     contract_index: int,
                     contract: BrokerContractBase,
-                    unit: float
+                    unit: float,
+                    time_stamp: str
                     ) -> None:
         """
         Place order that is requested by strategy.
@@ -506,6 +522,8 @@ class OrderManagerBase:
             Contract to be traded.
         unit: float
             Number of unit to trade.
+        time_stamp: str
+            Timestamp.
         """
         pass
 
@@ -585,7 +603,8 @@ class IBOrderManager(OrderManagerBase):
                     combo_name: str,
                     contract_index: int,
                     contract: IBBrokerAPI.IBBrokerContract,
-                    unit: float
+                    unit: float,
+                    time_stamp: str
                     ) -> None:
         """
         Place order that is requested by strategy.
@@ -602,26 +621,27 @@ class IBOrderManager(OrderManagerBase):
             Contract to be traded.
         unit: float
             Number of unit to trade.
+        time_stamp: str
+            Timestamp.
         """
-        if abs(unit) > utils.EPSILON:
+        order_notional = unit * self._combo_weight[(strategy_name, combo_name)][contract_index]
+        if abs(order_notional) > utils.EPSILON:
             # Update order status
+            buy_sell: str = 'BUY' if order_notional > utils.EPSILON else 'SELL'
+            # TBD: Other order types
+            # TBD: Need re-writing with brokerinterface
+            ib_order = ibi.order.MarketOrder(buy_sell, order_notional)
+            trade_object = self._broker_handle.placeOrder(contract.get_contract(), ib_order)
+            trade_object.statusEvent += self.update_order_status
+
             self.order_info_df = self.order_info_df.append({'strategy_name': strategy_name,
                                                             'combo_name': combo_name,
                                                             'contract_index': contract_index,
                                                             'combo_unit': unit,
-                                                            'dangling_order': unit,
-                                                            'order_id': self._broker_handle.client.getReqId(),
-                                                            'is_outstanding': True},
+                                                            'dangling_order': order_notional,
+                                                            'order_id': trade_object.orderStatus.orderId,
+                                                            'time_stamp': time_stamp},
                                                            ignore_index=True)
-
-            order_notional = unit * self._combo_weight[(strategy_name, combo_name)][contract_index]
-            if abs(order_notional) > utils.EPSILON:
-                buy_sell: str = 'BUY' if order_notional > utils.EPSILON else 'SELL'
-                # TBD: Other order types
-                # TBD: Need re-writing with brokerinterface
-                ib_order = ibi.order.MarketOrder(buy_sell, order_notional)
-                trade_object = self._broker_handle.placeOrder(contract.get_contract(), ib_order)
-                trade_object.statusEvent += self.update_order_status
 
     def update_order_status(self,
                             trade: ibi.order.Trade) -> None:
@@ -640,21 +660,22 @@ class IBOrderManager(OrderManagerBase):
 
         if abs(filled_amount) > utils.EPSILON:
             # Register leg with PortfolioManager
-            if order_id not in self.order_info_df['order_id']:
+            if order_id not in self.order_info_df['order_id'].to_list():
                 # Probably receiving order status update after it is already completely filled; do nothing
                 return
-
-            combo_name = self.order_info_df[self.order_info_df['order_id'] == order_id]['combo_name']
-            if sum(abs(self.order_info_df[self.order_info_df['combo_name'] == combo_name]['dangling_order'])) \
+            combo_name = self.order_info_df.loc[self.order_info_df['order_id'] == order_id, 'combo_name'].iloc[0]
+            time_stamp = self.order_info_df.loc[self.order_info_df['order_id'] == order_id, 'time_stamp'].iloc[0]
+            if sum(abs(self.order_info_df.loc[(self.order_info_df['combo_name'] == combo_name) &
+                                              (self.order_info_df['time_stamp'] == time_stamp), 'dangling_order'])) \
                     < utils.EPSILON:
                 # All legs in the combo already filled.
                 return
 
             # Update dangling order status.
-            self.order_info_df[self.order_info_df['order_id'] == order_id]['dangling_order'] -= filled_amount
+            self.order_info_df.loc[self.order_info_df['order_id'] == order_id, 'dangling_order'] -= filled_amount
 
             # Record leg entry price
-            self.order_info_df[self.order_info_df['order_id'] == order_id]['entry_price'] = average_fill_price
+            self.order_info_df.loc[self.order_info_df['order_id'] == order_id, 'entry_price'] = average_fill_price
 
             # Communicate update to portfolio manager.
             self._portfolio_manager.register_contract_trade(symbol=trade.contract.symbol,
@@ -663,24 +684,24 @@ class IBOrderManager(OrderManagerBase):
                                                             currency=trade.contract.currency,
                                                             position=filled_amount)
 
-            # See if the order is completely filled.
-            if status == 'Filled':
-                self.order_info_df[self.order_info_df['order_id'] == order_id]['is_outstanding'] = False
-
             # Check if all legs in the combo are filled, if so update portfolio manager accordingly.
-            if sum(abs(self.order_info_df[self.order_info_df['combo_name'] == combo_name]['dangling_order'])) \
+            if sum(abs(self.order_info_df.loc[(self.order_info_df['combo_name'] == combo_name) &
+                                              (self.order_info_df['time_stamp'] == time_stamp), 'dangling_order'])) \
                     < utils.EPSILON:
                 # Calculate combo entry price.
-                leg_entry_prices = (self.order_info_df[self.order_info_df['combo_name'] == combo_name]
-                                    [['contract_index', 'entry_price']])
+                leg_entry_prices = (self.order_info_df.loc[(self.order_info_df['combo_name'] == combo_name) &
+                                    (self.order_info_df['time_stamp'] == time_stamp),
+                                                           ['contract_index', 'entry_price']])
                 leg_entry_prices.sort_values(['contract_index'], ascending=True, inplace=True)
-                strategy_name = self.order_info_df[self.order_info_df['combo_name'] == combo_name]['strategy_name']
+                strategy_name = self.order_info_df.loc[
+                    self.order_info_df['combo_name'] == combo_name, 'strategy_name'].iloc[0]
                 combo_def = self._combo_weight[(strategy_name, combo_name)]
                 combo_entry_price = sum([x * y for x, y in zip(leg_entry_prices['entry_price'].tolist(), combo_def)])
 
                 # Register with portfolio manager
-                combo_unit = (self.order_info_df[self.order_info_df['combo_name'] == combo_name]
-                              ['combo_unit'])
+                combo_unit = (self.order_info_df.loc[(self.order_info_df['combo_name'] == combo_name) &
+                                                     (self.order_info_df['time_stamp'] == time_stamp),
+                              'combo_unit'].iloc[0])
                 self._portfolio_manager.register_combo_trade(
                     strategy_name=strategy_name,
                     combo_name=combo_name,
