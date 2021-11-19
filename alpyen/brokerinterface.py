@@ -245,7 +245,7 @@ class PortfolioManagerBase:
         # Create dataframes for storing information
         self.portfolio_info_df = pd.DataFrame(columns=['strategy_name', 'combo_name',
                                                        'combo_position', 'combo_entry_price',
-                                                       'combo_mtm_price', 'realized_pnl'])
+                                                       'combo_mtm_price', 'unrealized_pnl'])
         self.contract_info_df = pd.DataFrame(columns=['symbol', 'type', 'exchange', 'currency', 'position'])
 
     def update_combo_mtm_price(self, combo_mtm: pd.DataFrame):
@@ -257,19 +257,14 @@ class PortfolioManagerBase:
         combo_mtm: pd.DataFrame
             A dataframe with columns ['strategy_name', 'combo_name', 'combo_mtm_price'].
         """
-        # for row in combo_mtm.values:
-        #     is_existing = ((self.portfolio_info_df['strategy_name'] == row[0]) &
-        #                    (self.portfolio_info_df['combo_name'] == row[1])).any()
-        #     if is_existing:
-        #         (self.portfolio_info_df[(self.portfolio_info_df['strategy_name'] == row[0]) &
-        #                                 (self.portfolio_info_df['combo_name'] == row[1])]
-        #                                ['combo_position']) = row[2]
-        #     else:
-
+        if len(self.portfolio_info_df) == 0:
+            return
         temp_df = pd.merge(self.portfolio_info_df, combo_mtm,
                            how="left", on=['strategy_name', 'combo_name'])
         self.portfolio_info_df['combo_mtm_price'] = temp_df['combo_mtm_price_y'].fillna(temp_df['combo_mtm_price_x'])
-        self.portfolio_info_df.drop(['combo_mtm_price_y', 'combo_mtm_price_x'], axis=1)
+        self.portfolio_info_df['unrealized_pnl'] = ((self.portfolio_info_df['combo_mtm_price']
+                                                  - self.portfolio_info_df['combo_entry_price'])
+                                                  * self.portfolio_info_df['combo_position'])
 
     def get_combo_position(self,
                            strategy_name: str,
@@ -293,8 +288,8 @@ class PortfolioManagerBase:
                        (self.portfolio_info_df['combo_name'] == combo_name)).any()
         if is_existing:
             return (self.portfolio_info_df[(self.portfolio_info_df['strategy_name'] == strategy_name) &
-                                                           (self.portfolio_info_df['combo_name'] == combo_name)]
-                                                          ['combo_position'])
+                                           (self.portfolio_info_df['combo_name'] == combo_name)]
+                                          ['combo_position'])
         else:
             return 0.0
 
@@ -397,19 +392,21 @@ class IBPortfolioManager(PortfolioManagerBase):
         is_existing = ((self.portfolio_info_df['strategy_name'] == strategy_name) &
                        (self.portfolio_info_df['combo_name'] == combo_name)).any()
         if is_existing:
-            existing_entry_price = (self.portfolio_info_df[(self.portfolio_info_df['strategy_name'] == strategy_name) &
-                                                           (self.portfolio_info_df['combo_name'] == combo_name)]
-                                                          ['combo_entry_price'])
-            existing_position = (self.portfolio_info_df[(self.portfolio_info_df['strategy_name'] == strategy_name) &
-                                                        (self.portfolio_info_df['combo_name'] == combo_name)]
-                                                       ['combo_position'])
+            existing_entry_price = (self.portfolio_info_df.loc[
+                (self.portfolio_info_df['strategy_name'] == strategy_name) &
+                (self.portfolio_info_df['combo_name'] == combo_name),
+                'combo_entry_price'].iloc[0])
+            existing_position = (self.portfolio_info_df.loc[
+                (self.portfolio_info_df['strategy_name'] == strategy_name) &
+                (self.portfolio_info_df['combo_name'] == combo_name),
+                'combo_position'].iloc[0])
             # Update entry price
             if existing_position * combo_unit < 0.0:
                 # If new order and existing holding are of opposite sign
                 if abs(combo_unit) > abs(existing_position):
-                    (self.portfolio_info_df[(self.portfolio_info_df['strategy_name'] == strategy_name) &
-                                            (self.portfolio_info_df['combo_name'] == combo_name)]
-                                           ['combo_entry_price']) = combo_entry_price
+                    (self.portfolio_info_df.loc[(self.portfolio_info_df['strategy_name'] == strategy_name) &
+                                                (self.portfolio_info_df['combo_name'] == combo_name),
+                                                'combo_entry_price']) = combo_entry_price
                 else:
                     # Do not update entry price, because old position not completely consumed.
                     pass
@@ -418,27 +415,27 @@ class IBPortfolioManager(PortfolioManagerBase):
                 new_weighted_entry_price = ((abs(existing_position) * existing_entry_price
                                              + abs(combo_unit) * combo_entry_price)
                                             / abs(existing_position + combo_unit))
-                (self.portfolio_info_df[(self.portfolio_info_df['strategy_name'] == strategy_name) &
-                                        (self.portfolio_info_df['combo_name'] == combo_name)]
-                                       ['combo_entry_price']) = new_weighted_entry_price
+                (self.portfolio_info_df.loc[(self.portfolio_info_df['strategy_name'] == strategy_name) &
+                                            (self.portfolio_info_df['combo_name'] == combo_name),
+                                            'combo_entry_price']) = new_weighted_entry_price
             # Update realized PnL
             position_closed = 0.0
             if existing_position * combo_unit < 0.0:
                 # If new order and existing holding are of opposite sign
                 position_closed = min(abs(existing_position), abs(combo_unit))
-            existing_pnl = (self.portfolio_info_df[(self.portfolio_info_df['strategy_name'] == strategy_name) &
-                                                   (self.portfolio_info_df['combo_name'] == combo_name)]
-                                                  ['realized_pnl'])
+            existing_pnl = (self.portfolio_info_df.loc[(self.portfolio_info_df['strategy_name'] == strategy_name) &
+                                                       (self.portfolio_info_df['combo_name'] == combo_name),
+                                                       'realized_pnl'])
             existing_holding_direction = existing_position / abs(existing_position)
-            (self.portfolio_info_df[(self.portfolio_info_df['strategy_name'] == strategy_name) &
-                                    (self.portfolio_info_df['combo_name'] == combo_name)]
-                                   ['realized_pnl']) = existing_pnl + existing_holding_direction * position_closed\
+            (self.portfolio_info_df.loc[(self.portfolio_info_df['strategy_name'] == strategy_name) &
+                                        (self.portfolio_info_df['combo_name'] == combo_name),
+                                        'realized_pnl']) = existing_pnl + existing_holding_direction * position_closed\
                 * (combo_entry_price - existing_entry_price)
 
             # Update combo holding
-            (self.portfolio_info_df[(self.portfolio_info_df['strategy_name'] == strategy_name) &
-                                    (self.portfolio_info_df['combo_name'] == combo_name)]
-                                   ['combo_position']) = existing_position + combo_unit
+            (self.portfolio_info_df.loc[(self.portfolio_info_df['strategy_name'] == strategy_name) &
+                                        (self.portfolio_info_df['combo_name'] == combo_name),
+                                        'combo_position']) = existing_position + combo_unit
         else:
             self.portfolio_info_df = self.portfolio_info_df.append({'strategy_name': strategy_name,
                                                                     'combo_name': combo_name,
@@ -502,10 +499,10 @@ class OrderManagerBase:
     def place_order(self,
                     strategy_name: str,
                     combo_name: str,
+                    time_stamp: str,
                     contract_index: int,
                     contract: BrokerContractBase,
-                    unit: float,
-                    time_stamp: str
+                    unit: float
                     ) -> None:
         """
         Place order that is requested by strategy.
@@ -516,14 +513,14 @@ class OrderManagerBase:
             Name of the strategy placing the order.
         combo_name: str
             Name of the combo. Each combo in a strategy should have a unique name.
+        time_stamp: str
+            Timestamp.
         contract_index: int
             Index of the contract as found in contract array.
         contract: BrokerContractBase
             Contract to be traded.
         unit: float
             Number of unit to trade.
-        time_stamp: str
-            Timestamp.
         """
         pass
 
@@ -601,10 +598,10 @@ class IBOrderManager(OrderManagerBase):
     def place_order(self,
                     strategy_name: str,
                     combo_name: str,
+                    time_stamp: str,
                     contract_index: int,
                     contract: IBBrokerAPI.IBBrokerContract,
-                    unit: float,
-                    time_stamp: str
+                    unit: float
                     ) -> None:
         """
         Place order that is requested by strategy.
@@ -615,14 +612,14 @@ class IBOrderManager(OrderManagerBase):
             Name of the strategy placing the order.
         combo_name: str
             Name of the combo. Each combo in a strategy should have a unique name.
+        time_stamp: str
+            Timestamp.
         contract_index: int
             Index of the contract as found in contract array.
         contract: IBBrokerAPI.IBBrokerContract
             Contract to be traded.
         unit: float
             Number of unit to trade.
-        time_stamp: str
-            Timestamp.
         """
         order_notional = unit * self._combo_weight[(strategy_name, combo_name)][contract_index]
         if abs(order_notional) > utils.EPSILON:
@@ -655,7 +652,6 @@ class IBOrderManager(OrderManagerBase):
         """
         order_id = trade.orderStatus.orderId
         average_fill_price = trade.orderStatus.avgFillPrice
-        status = trade.orderStatus.status
         filled_amount = trade.orderStatus.filled
 
         if abs(filled_amount) > utils.EPSILON:
@@ -695,7 +691,8 @@ class IBOrderManager(OrderManagerBase):
                 leg_entry_prices.sort_values(['contract_index'], ascending=True, inplace=True)
                 strategy_name = self.order_info_df.loc[
                     self.order_info_df['combo_name'] == combo_name, 'strategy_name'].iloc[0]
-                combo_def = self._combo_weight[(strategy_name, combo_name)]
+                combo_def = [self._combo_weight[(strategy_name, combo_name)][index]
+                             for index in leg_entry_prices['contract_index']]
                 combo_entry_price = sum([x * y for x, y in zip(leg_entry_prices['entry_price'].tolist(), combo_def)])
 
                 # Register with portfolio manager
@@ -708,3 +705,7 @@ class IBOrderManager(OrderManagerBase):
                     combo_unit=combo_unit,
                     combo_def=combo_def,
                     combo_entry_price=combo_entry_price)
+
+                # Clean up dataframe by deleting rows already filled
+                self.order_info_df = self.order_info_df[~(self.order_info_df['combo_name'] == combo_name) |
+                                                        ~(self.order_info_df['time_stamp'] == time_stamp)]

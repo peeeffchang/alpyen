@@ -397,10 +397,11 @@ class StrategyBase(ABC):
                 for i in range(len(combo_def)):
                     self._order_manager.place_order(self._strategy_name,
                                                     combo_name,
+                                                    time_stamp,
                                                     i,
                                                     contract_array[i],
-                                                    amount,
-                                                    time_stamp)
+                                                    amount
+                                                    )
                 self._combo_positions[combo_name] += amount
             else:
                 # Some strategies do not have predefined combos;
