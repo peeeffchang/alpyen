@@ -245,7 +245,8 @@ class PortfolioManagerBase:
         # Create dataframes for storing information
         self.portfolio_info_df = pd.DataFrame(columns=['strategy_name', 'combo_name',
                                                        'combo_position', 'combo_entry_price',
-                                                       'combo_mtm_price', 'unrealized_pnl'])
+                                                       'combo_mtm_price', 'unrealized_pnl',
+                                                       'realized_pnl'])
         self.contract_info_df = pd.DataFrame(columns=['symbol', 'type', 'exchange', 'currency', 'position'])
 
     def update_combo_mtm_price(self, combo_mtm: pd.DataFrame):
@@ -263,8 +264,8 @@ class PortfolioManagerBase:
                            how="left", on=['strategy_name', 'combo_name'])
         self.portfolio_info_df['combo_mtm_price'] = temp_df['combo_mtm_price_y'].fillna(temp_df['combo_mtm_price_x'])
         self.portfolio_info_df['unrealized_pnl'] = ((self.portfolio_info_df['combo_mtm_price']
-                                                  - self.portfolio_info_df['combo_entry_price'])
-                                                  * self.portfolio_info_df['combo_position'])
+                                                    - self.portfolio_info_df['combo_entry_price'])
+                                                    * self.portfolio_info_df['combo_position'])
 
     def get_combo_position(self,
                            strategy_name: str,
@@ -287,9 +288,9 @@ class PortfolioManagerBase:
         is_existing = ((self.portfolio_info_df['strategy_name'] == strategy_name) &
                        (self.portfolio_info_df['combo_name'] == combo_name)).any()
         if is_existing:
-            return (self.portfolio_info_df[(self.portfolio_info_df['strategy_name'] == strategy_name) &
-                                           (self.portfolio_info_df['combo_name'] == combo_name)]
-                                          ['combo_position'])
+            return (self.portfolio_info_df.loc[(self.portfolio_info_df['strategy_name'] == strategy_name) &
+                                               (self.portfolio_info_df['combo_name'] == combo_name),
+                                               'combo_position'].iloc[0])
         else:
             return 0.0
 
@@ -357,10 +358,10 @@ class IBPortfolioManager(PortfolioManagerBase):
                 (self.contract_info_df['type'] == type_) &
                 (self.contract_info_df['exchange'] == exchange) &
                 (self.contract_info_df['currency'] == currency)).any():
-            self.contract_info_df[(self.contract_info_df['symbol'] == symbol) &
-                                  (self.contract_info_df['type'] == type_) &
-                                  (self.contract_info_df['exchange'] == exchange) &
-                                  (self.contract_info_df['currency'] == currency)]['position'] += position
+            self.contract_info_df.loc[(self.contract_info_df['symbol'] == symbol) &
+                                      (self.contract_info_df['type'] == type_) &
+                                      (self.contract_info_df['exchange'] == exchange) &
+                                      (self.contract_info_df['currency'] == currency), 'position'] += position
         else:
             self.contract_info_df = self.contract_info_df.append({'symbol': symbol,
                                                                   'type': type_,

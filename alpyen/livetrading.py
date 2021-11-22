@@ -1,9 +1,9 @@
 from . import brokerinterface
 
 
-class EventContext:
+class LiveTrader:
     """
-    Class for event context.
+    Class for live trader.
     TBD: Make it a singleton
     """
 
@@ -11,7 +11,7 @@ class EventContext:
                  broker_api: brokerinterface.BrokerAPIBase,
                  data_api: brokerinterface.BrokerAPIBase) -> None:
         """
-        Initialize event context.
+        Initialize live trader.
 
         Parameters
         ----------
@@ -23,8 +23,8 @@ class EventContext:
         self._broker_handle = broker_api.get_handle()
         self._data_handle = data_api.get_handle()
 
-    def get_broker(self):
+    def get_broker_handle(self):
         return self._broker_handle
 
-    def get_data(self):
+    def get_data_handle(self):
         return self._data_handle
