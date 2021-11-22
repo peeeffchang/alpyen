@@ -33,7 +33,8 @@ class SignalBase(ABC):
     def __new__(cls,
                 signature_str: str,
                 input_data_array: List[Event],
-                warmup_length: int):
+                warmup_length: int,
+                **kwargs):
         """
         Create derived signal object.
 

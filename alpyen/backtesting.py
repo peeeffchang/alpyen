@@ -33,7 +33,8 @@ class SignalInfo:
     def __init__(self,
                  signal_signature: str,
                  input_names: List[str],
-                 params: List[float],) -> None:
+                 warmup_length: int,
+                 custom_params: Dict) -> None:
         """
         Initialize signal info
 
@@ -43,18 +44,24 @@ class SignalInfo:
             Unique signature of the signal.
         input_names: List[str]
             List of inputs the signal is listening to.
-        params: List[float]
-            List of parameters for calculating the signal.
+        warmup_length: int
+            Warm-up length.
+        custom_params: Dict
+            Other signal specific parameters.
         """
         self._input_names = input_names
-        self._params = params
+        self._warmup_length = warmup_length
+        self._custom_params = custom_params
         self._signal_signature = signal_signature
 
     def get_input_names(self) -> List[str]:
         return self._input_names
 
-    def get_params(self) -> List[float]:
-        return self._params
+    def get_warmup_length(self) -> int:
+        return self._warmup_length
+
+    def get_custom_params(self) -> Dict:
+        return self._custom_params
 
     def get_signal_signature(self) -> str:
         return self._signal_signature
@@ -222,7 +229,10 @@ class Backtester:
             for name_i in v.get_input_names():
                 price_event_list.append(data_event_dict.get(name_i))
             # Create signal
-            output_dict[k] = signal.SignalBase(v.get_signal_signature(), price_event_list, int(v.get_params()[0]))
+            output_dict[k] = signal.SignalBase(v.get_signal_signature(),
+                                               price_event_list,
+                                               v.get_warmup_length(),
+                                               **v.get_custom_params())
         return output_dict
 
     def create_strategy_dict(self,

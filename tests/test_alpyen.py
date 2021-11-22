@@ -60,9 +60,9 @@ def test_backtesting_macrossing_reshuffle():
     # Subscribe to signals
     signal_info_dict = {}
     signal_info_dict[short_lookback_name]\
-        = backtesting.SignalInfo('MA', ticker_names, [short_lookback])
+        = backtesting.SignalInfo('MA', ticker_names, short_lookback, {})
     signal_info_dict[long_lookback_name]\
-        = backtesting.SignalInfo('MA', ticker_names, [long_lookback])
+        = backtesting.SignalInfo('MA', ticker_names, long_lookback, {})
 
     # Subscribe to strategies
     strategy_info_dict = {}
@@ -117,9 +117,9 @@ def test_backtesting_macrossing_resample():
     # Subscribe to signals
     signal_info_dict = {}
     signal_info_dict[short_lookback_name]\
-        = backtesting.SignalInfo('MA', ticker_names, [short_lookback])
+        = backtesting.SignalInfo('MA', ticker_names, short_lookback, {})
     signal_info_dict[long_lookback_name]\
-        = backtesting.SignalInfo('MA', ticker_names, [long_lookback])
+        = backtesting.SignalInfo('MA', ticker_names, long_lookback, {})
 
     # Subscribe to strategies
     strategy_info_dict = {}
@@ -148,7 +148,7 @@ def test_backtesting_macrossing_resample():
     assert statistics.mean(backtest_results[strategy_name][str(backtesting.MetricType.PoorMansSharpeRatio)])\
            == pytest.approx(0.105, 0.05)
     assert statistics.stdev(backtest_results[strategy_name][str(backtesting.MetricType.PoorMansSharpeRatio)])\
-           == pytest.approx(0.0308, 0.05)
+           == pytest.approx(0.0308, 0.10)
     assert statistics.mean(backtest_results[strategy_name][str(backtesting.MetricType.MaximumDrawDown)])\
            == pytest.approx(0.152, 0.05)
     assert statistics.stdev(backtest_results[strategy_name][str(backtesting.MetricType.MaximumDrawDown)])\
@@ -170,7 +170,7 @@ def test_backtesting_vaa():
     signal_info_dict = {}
     lookback = 253
     for ticker in ticker_names:
-        signal_info_dict[ticker + '_WM_1'] = backtesting.SignalInfo('WM', [ticker], [lookback])
+        signal_info_dict[ticker + '_WM_1'] = backtesting.SignalInfo('WM', [ticker], lookback, {})
 
     # Subscribe to strategies
     strategy_info_dict = {}
@@ -216,6 +216,30 @@ class IncreaseDecrease(signal.SignalBase):
         return 1 if prices[-1] - prices[0] > 0.0 else -1
 
 
+class IncreaseDecreasePlus(IncreaseDecrease):
+    _signal_signature = 'IDP'
+
+    def __init__(self,
+                 signature_str: str,
+                 input_data_array: List[Event],
+                 warmup_length: int,
+                 **kwargs) -> None:
+        if warmup_length <= 1:
+            raise ValueError('IncreaseDecreasePlus: warmup_length must be greater than 1.')
+        self._signal_name = input_data_array[0].name() + "_IDP_" + str(warmup_length)
+        self._signal_event = Event(self._signal_name)
+        self._threshold = kwargs['threshold']
+
+    def calculate_signal(self) -> int:
+        prices = self.get_data_by_name(self._input_data_array[0].name())
+        if prices[-1] - prices[0] > self._threshold:
+            return 1
+        elif prices[-1] - prices[0] < -self._threshold:
+            return -1
+        else:
+            return 0
+
+
 class BuyIncreaseSellDecrease(strategy.StrategyBase):
     _strategy_signature = 'BISD'
 
@@ -231,9 +255,42 @@ class BuyIncreaseSellDecrease(strategy.StrategyBase):
     def make_order_decision(self) -> Dict[str, float]:
         signal_name = next(iter(self._signal_storage))
         if self._signal_storage[signal_name][-1] > 0 and not self.is_currently_long('combo1'):
-            return {'combo1': 2.0, 'combo2': -2.0}
+            return {'combo1': 0.2, 'combo2': -0.2}
         elif self._signal_storage[signal_name][-1] < 0 and not self.is_currently_long('combo2'):
-            return {'combo1': -2.0, 'combo2': 2.0}
+            return {'combo1': -0.2, 'combo2': 0.2}
+
+
+class BuyIncreaseSellDecreasePlus(BuyIncreaseSellDecrease):
+    _strategy_signature = 'BISDP'
+
+    def __init__(self,
+                 signature_str: str,
+                 input_signal_array: List[Event],
+                 trade_combo: strategy.TradeCombos,
+                 warmup_length: int,
+                 initial_capital: float = 100.0,
+                 order_manager: brokerinterface.OrderManagerBase = None) -> None:
+        self._strategy_name = 'BuyIncreaseSellDecreasePlus'
+
+    def make_order_decision(self) -> Dict[str, float]:
+        signal_name = next(iter(self._signal_storage))
+        weight_1 = 0.0
+        weight_2 = 0.0
+        if self._signal_storage[signal_name][-1] > 0:
+            if self.is_currently_long('combo1'):
+                weight_1 = 0.01
+            else:
+                weight_1 = 0.2
+        else:
+            weight_1 = -0.22
+        if self._signal_storage[signal_name][-1] < 0:
+            if self.is_currently_long('combo2'):
+                weight_2 = 0.01
+            else:
+                weight_2 = 0.2
+        else:
+            weight_2 = -0.22
+        return {'combo1': weight_1, 'combo2': weight_2}
 
 
 def test_backtesting_on_the_fly_signal_strategy():
@@ -243,21 +300,28 @@ def test_backtesting_on_the_fly_signal_strategy():
     trade_ticker_names = ['VOO', 'SHY']
     file_path = os.path.join(os.path.dirname(__file__), data_folder)
     warmup_length = 5
-    signal_name = signal_ticker_name + '_ID_' + str(warmup_length)
+    signal_name1 = signal_ticker_name + '_ID_' + str(warmup_length)
+    signal_name2 = signal_ticker_name + '_IDP_' + str(warmup_length)
     signal_ticker_names = [signal_ticker_name]
     all_input = datacontainer.DataUtils.aggregate_yahoo_data(signal_ticker_names + trade_ticker_names, file_path)
 
     # Subscribe to signals
     signal_info_dict = {}
-    signal_info_dict[signal_name]\
-        = backtesting.SignalInfo('ID', signal_ticker_names, [warmup_length])
+    signal_info_dict[signal_name1]\
+        = backtesting.SignalInfo('ID', signal_ticker_names, warmup_length, {})
+    signal_info_dict[signal_name2]\
+        = backtesting.SignalInfo('IDP', signal_ticker_names, warmup_length, {'threshold': 0.05})
 
     # Subscribe to strategies
     strategy_info_dict = {}
     strategy_name = signal_ticker_name + '_BuyIncreaseSellDecrease'
     strategy_info_dict[strategy_name] = backtesting.StrategyInfo(
         'BISD',
-        [signal_name],
+        [signal_name1],
+        1, {}, trade_ticker_names, {'combo1': [1.0, -3.0], 'combo2': [-1.0, 2.0]})
+    strategy_info_dict[strategy_name+'Plus'] = backtesting.StrategyInfo(
+        'BISDP',
+        [signal_name2],
         1, {}, trade_ticker_names, {'combo1': [1.0, -3.0], 'combo2': [-1.0, 2.0]})
 
     # Create backtester
@@ -271,9 +335,15 @@ def test_backtesting_on_the_fly_signal_strategy():
     # Check
     # Actual historical path
     assert backtest_results[strategy_name][str(backtesting.MetricType.PoorMansSharpeRatio)][0]\
-           == pytest.approx(0.02042, 0.0001)
+           == pytest.approx(0.015934, 0.0001)
     assert backtest_results[strategy_name][str(backtesting.MetricType.MaximumDrawDown)][0]\
-           == pytest.approx(3.1571, 0.0001)
+           == pytest.approx(0.39325, 0.0001)
     assert backtest_results[strategy_name][str(backtesting.MetricType.Return)][0]\
-           == pytest.approx(2.66176, 0.0001)
+           == pytest.approx(0.266176, 0.0001)
+    assert backtest_results[strategy_name+'Plus'][str(backtesting.MetricType.PoorMansSharpeRatio)][0]\
+           == pytest.approx(-0.013084, 0.0001)
+    assert backtest_results[strategy_name+'Plus'][str(backtesting.MetricType.MaximumDrawDown)][0]\
+           == pytest.approx(1.05596, 0.0001)
+    assert backtest_results[strategy_name+'Plus'][str(backtesting.MetricType.Return)][0]\
+           == pytest.approx(6.1448, 0.0001)
 
