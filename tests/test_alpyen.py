@@ -2,14 +2,19 @@
 
 """Tests for `alpyen` package."""
 
+from eventkit import Event
+import os
 import pytest
 import statistics
+from typing import List, Dict
 
 from click.testing import CliRunner
 
 from alpyen import datacontainer
 from alpyen import backtesting
+from alpyen import brokerinterface
 from alpyen import cli
+from alpyen import signal
 from alpyen import strategy
 
 
@@ -40,23 +45,24 @@ def test_command_line_interface():
     assert '--help  Show this message and exit.' in help_result.output
 
 
-def test_backtesting_macrossing():
+def test_backtesting_macrossing_reshuffle():
     # Read data
-    data_folder_path = 'Data\\'
+    data_folder = 'Data\\'
     ticker_name = 'BBH'
+    file_path = os.path.join(os.path.dirname(__file__), data_folder)
     short_lookback = 5
     long_lookback = 200
     short_lookback_name = ticker_name + '_MA_' + str(short_lookback)
     long_lookback_name = ticker_name + '_MA_' + str(long_lookback)
     ticker_names = [ticker_name]
-    all_input = datacontainer.DataUtils.aggregate_yahoo_data(ticker_names, data_folder_path)
+    all_input = datacontainer.DataUtils.aggregate_yahoo_data(ticker_names, file_path)
 
     # Subscribe to signals
     signal_info_dict = {}
     signal_info_dict[short_lookback_name]\
-        = backtesting.SignalInfo('MA', ticker_names, [short_lookback])
+        = backtesting.SignalInfo('MA', ticker_names, short_lookback, {})
     signal_info_dict[long_lookback_name]\
-        = backtesting.SignalInfo('MA', ticker_names, [long_lookback])
+        = backtesting.SignalInfo('MA', ticker_names, long_lookback, {})
 
     # Subscribe to strategies
     strategy_info_dict = {}
@@ -76,37 +82,95 @@ def test_backtesting_macrossing():
     # Check
     # Actual historical path
     assert backtest_results[strategy_name][str(backtesting.MetricType.PoorMansSharpeRatio)][0]\
-           == pytest.approx(0.09503, 0.0001)
+        == pytest.approx(0.09503, 0.0001)
     assert backtest_results[strategy_name][str(backtesting.MetricType.MaximumDrawDown)][0]\
-           == pytest.approx(0.11913, 0.0001)
+        == pytest.approx(0.11913, 0.0001)
     assert backtest_results[strategy_name][str(backtesting.MetricType.Return)][0]\
-           == pytest.approx(0.74978, 0.0001)
+        == pytest.approx(0.74978, 0.0001)
     # All (including simulated) paths
     assert statistics.mean(backtest_results[strategy_name][str(backtesting.MetricType.PoorMansSharpeRatio)])\
-           == pytest.approx(0.105, 0.05)
+        == pytest.approx(0.105, 0.05)
     assert statistics.stdev(backtest_results[strategy_name][str(backtesting.MetricType.PoorMansSharpeRatio)])\
-           == pytest.approx(0.0308, 0.05)
+        == pytest.approx(0.0308, 0.05)
     assert statistics.mean(backtest_results[strategy_name][str(backtesting.MetricType.MaximumDrawDown)])\
-           == pytest.approx(0.152, 0.05)
+        == pytest.approx(0.152, 0.05)
     assert statistics.stdev(backtest_results[strategy_name][str(backtesting.MetricType.MaximumDrawDown)])\
-           == pytest.approx(0.0611, 0.05)
+        == pytest.approx(0.0611, 0.05)
     assert statistics.mean(backtest_results[strategy_name][str(backtesting.MetricType.Return)])\
-           == pytest.approx(0.865, 0.05)
+        == pytest.approx(0.865, 0.05)
     assert statistics.stdev(backtest_results[strategy_name][str(backtesting.MetricType.Return)])\
-           == pytest.approx(0.326, 0.05)
+        == pytest.approx(0.326, 0.05)
+
+
+def test_backtesting_macrossing_resample():
+    # Read data
+    data_folder = 'Data\\'
+    ticker_name = 'BBH'
+    file_path = os.path.join(os.path.dirname(__file__), data_folder)
+    short_lookback = 5
+    long_lookback = 200
+    short_lookback_name = ticker_name + '_MA_' + str(short_lookback)
+    long_lookback_name = ticker_name + '_MA_' + str(long_lookback)
+    ticker_names = [ticker_name]
+    all_input = datacontainer.DataUtils.aggregate_yahoo_data(ticker_names, file_path)
+
+    # Subscribe to signals
+    signal_info_dict = {}
+    signal_info_dict[short_lookback_name]\
+        = backtesting.SignalInfo('MA', ticker_names, short_lookback, {})
+    signal_info_dict[long_lookback_name]\
+        = backtesting.SignalInfo('MA', ticker_names, long_lookback, {})
+
+    # Subscribe to strategies
+    strategy_info_dict = {}
+    strategy_name = ticker_name + '_MACrossing_01'
+    strategy_info_dict[strategy_name] = backtesting.StrategyInfo(
+        'MACrossing',
+        [short_lookback_name, long_lookback_name],
+        1, {}, ticker_names, {'combo1': [1.0]})
+
+    # Create backtester
+    number_path = 1000
+    my_backtester = backtesting.Backtester(all_input, ticker_names, signal_info_dict, strategy_info_dict,
+                                           number_path)
+    my_backtester.run_backtest(backtesting.PathGenerationType.ReturnResampling)
+    backtest_results = my_backtester.get_results()
+
+    # Check
+    # Actual historical path
+    assert backtest_results[strategy_name][str(backtesting.MetricType.PoorMansSharpeRatio)][0]\
+        == pytest.approx(0.09503, 0.0001)
+    assert backtest_results[strategy_name][str(backtesting.MetricType.MaximumDrawDown)][0]\
+        == pytest.approx(0.11913, 0.0001)
+    assert backtest_results[strategy_name][str(backtesting.MetricType.Return)][0]\
+        == pytest.approx(0.74978, 0.0001)
+    # All (including simulated) paths
+    assert statistics.mean(backtest_results[strategy_name][str(backtesting.MetricType.PoorMansSharpeRatio)])\
+        == pytest.approx(0.105, 0.05)
+    assert statistics.stdev(backtest_results[strategy_name][str(backtesting.MetricType.PoorMansSharpeRatio)])\
+        == pytest.approx(0.0308, 0.10)
+    assert statistics.mean(backtest_results[strategy_name][str(backtesting.MetricType.MaximumDrawDown)])\
+        == pytest.approx(0.152, 0.05)
+    assert statistics.stdev(backtest_results[strategy_name][str(backtesting.MetricType.MaximumDrawDown)])\
+        == pytest.approx(0.0552, 0.10)
+    assert statistics.mean(backtest_results[strategy_name][str(backtesting.MetricType.Return)])\
+        == pytest.approx(0.865, 0.05)
+    assert statistics.stdev(backtest_results[strategy_name][str(backtesting.MetricType.Return)])\
+        == pytest.approx(0.326, 0.05)
 
 
 def test_backtesting_vaa():
     # Read data
-    data_folder_path = 'Data\\'
+    data_folder = 'Data\\'
     ticker_names = ['VOO', 'VWO', 'VEA', 'BND', 'SHY', 'IEF', 'LQD']
-    all_input = datacontainer.DataUtils.aggregate_yahoo_data(ticker_names, data_folder_path)
+    file_path = os.path.join(os.path.dirname(__file__), data_folder)
+    all_input = datacontainer.DataUtils.aggregate_yahoo_data(ticker_names, file_path)
 
     # Subscribe to signals
     signal_info_dict = {}
     lookback = 253
     for ticker in ticker_names:
-        signal_info_dict[ticker + '_WM_1'] = backtesting.SignalInfo('WM', [ticker], [lookback])
+        signal_info_dict[ticker + '_WM_1'] = backtesting.SignalInfo('WM', [ticker], lookback, {})
 
     # Subscribe to strategies
     strategy_info_dict = {}
@@ -118,7 +182,7 @@ def test_backtesting_vaa():
         ticker_names, {'combo1': [1.0] * len(ticker_names)})
 
     # Create backtester
-    number_path = 1000
+    number_path = 1
     my_backtester = backtesting.Backtester(all_input, ticker_names, signal_info_dict, strategy_info_dict,
                                            number_path)
     my_backtester.run_backtest()
@@ -127,62 +191,159 @@ def test_backtesting_vaa():
     # Check
     # Actual historical path
     assert backtest_results[strategy_name][str(backtesting.MetricType.PoorMansSharpeRatio)][0]\
-           == pytest.approx(0.08549, 0.0001)
+        == pytest.approx(0.08549, 0.0001)
     assert backtest_results[strategy_name][str(backtesting.MetricType.MaximumDrawDown)][0]\
-           == pytest.approx(0.08114, 0.0001)
+        == pytest.approx(0.08114, 0.0001)
     assert backtest_results[strategy_name][str(backtesting.MetricType.Return)][0]\
-           == pytest.approx(1.01538, 0.0001)
-    # All (including simulated) paths
-    assert statistics.mean(backtest_results[strategy_name][str(backtesting.MetricType.PoorMansSharpeRatio)])\
-           == pytest.approx(0.03377, 0.05)
-    assert statistics.stdev(backtest_results[strategy_name][str(backtesting.MetricType.PoorMansSharpeRatio)])\
-           == pytest.approx(0.01799, 0.05)
-    assert statistics.mean(backtest_results[strategy_name][str(backtesting.MetricType.MaximumDrawDown)])\
-           == pytest.approx(0.13297, 0.05)
-    assert statistics.stdev(backtest_results[strategy_name][str(backtesting.MetricType.MaximumDrawDown)])\
-           == pytest.approx(0.047857, 0.05)
-    assert statistics.mean(backtest_results[strategy_name][str(backtesting.MetricType.Return)])\
-           == pytest.approx(0.3629, 0.05)
-    assert statistics.stdev(backtest_results[strategy_name][str(backtesting.MetricType.Return)])\
-           == pytest.approx(0.2243, 0.05)
+        == pytest.approx(1.01538, 0.0001)
 
-from alpyen import brokerinterface
-from alpyen import signal
 
-def test_backtesting_live():
-    ib_api = brokerinterface.IBBrokerAPI()
-    ib_api.connect(port=4002)
+# Signal and Strategy for on-the-fly signal and strategy test
+class IncreaseDecrease(signal.SignalBase):
+    _signal_signature = 'ID'
 
-    # Contract
-    input_data_name = 'EURUSD'
-    eurusd_contract = brokerinterface.IBBrokerAPI.IBBrokerContract(brokerinterface.ContractType.FX,
-                                                          input_data_name)
+    def __init__(self,
+                 signature_str: str,
+                 input_data_array: List[Event],
+                 warmup_length: int) -> None:
+        if warmup_length <= 1:
+            raise ValueError('IncreaseDecrease: warmup_length must be greater than 1.')
+        self._signal_name = input_data_array[0].name() + "_ID_" + str(warmup_length)
+        self._signal_event = Event(self._signal_name)
 
-    # Broker relay
-    eurusd_bar_relay = brokerinterface.IBBrokerAPI.IBBrokerEventRelay(input_data_name)
+    def calculate_signal(self) -> int:
+        prices = self.get_data_by_name(self._input_data_array[0].name())
+        return 1 if prices[-1] - prices[0] > 0.0 else -1
 
-    # Signals
-    ma_signal_short = signal.SignalBase('MA', [eurusd_bar_relay.get_event()], 2)
-    ma_signal_long = signal.SignalBase('MA', [eurusd_bar_relay.get_event()], 3)
 
-    eurusd_ma_dataslot = signal.DataSlot(input_data_name, [ma_signal_short, ma_signal_short])
+class IncreaseDecreasePlus(IncreaseDecrease):
+    _signal_signature = 'IDP'
 
-    # Subscription
-    live_bars = ib_api.request_live_bars(eurusd_contract, brokerinterface.PriceDataType.Mid)
+    def __init__(self,
+                 signature_str: str,
+                 input_data_array: List[Event],
+                 warmup_length: int,
+                 **kwargs) -> None:
+        if warmup_length <= 1:
+            raise ValueError('IncreaseDecreasePlus: warmup_length must be greater than 1.')
+        self._signal_name = input_data_array[0].name() + "_IDP_" + str(warmup_length)
+        self._signal_event = Event(self._signal_name)
+        self._threshold = kwargs['threshold']
 
-    # Create signals
-    eurusd_data = signal.DataSlot(input_data_name, [ma_signal_short, ma_signal_long])
-    ber = brokerinterface.IBBrokerAPI.IBBrokerEventRelay(input_data_name, 'close')
+    def calculate_signal(self) -> int:
+        prices = self.get_data_by_name(self._input_data_array[0].name())
+        if prices[-1] - prices[0] > self._threshold:
+            return 1
+        elif prices[-1] - prices[0] < -self._threshold:
+            return -1
+        else:
+            return 0
 
-    live_bars.updateEvent += ber.live_bar
 
-    # Create strategy
-    trade_combos = strategy.TradeCombos([ber.get_event()], {'combo1': [1.0]})
-    order_manager = brokerinterface.OrderManager(ib_api)
+class BuyIncreaseSellDecrease(strategy.StrategyBase):
+    _strategy_signature = 'BISD'
 
-    macrossing_strategy = strategy.MACrossingStrategy(
-        'MACrossing',
-        [ma_signal_short.get_signal_event(), ma_signal_long.get_signal_event()],
-        trade_combos, 1, order_manager=order_manager)
+    def __init__(self,
+                 signature_str: str,
+                 input_signal_array: List[Event],
+                 trade_combo: strategy.TradeCombos,
+                 warmup_length: int,
+                 initial_capital: float = 100.0,
+                 order_manager: brokerinterface.OrderManagerBase = None) -> None:
+        self._strategy_name = 'BuyIncreaseSellDecrease'
 
-    ib_api.get_handle().sleep(200)
+    def make_order_decision(self) -> Dict[str, float]:
+        signal_name = next(iter(self._signal_storage))
+        if self._signal_storage[signal_name][-1] > 0 and not self.is_currently_long('combo1'):
+            return {'combo1': 0.2, 'combo2': -0.2}
+        elif self._signal_storage[signal_name][-1] < 0 and not self.is_currently_long('combo2'):
+            return {'combo1': -0.2, 'combo2': 0.2}
+
+
+class BuyIncreaseSellDecreasePlus(BuyIncreaseSellDecrease):
+    _strategy_signature = 'BISDP'
+
+    def __init__(self,
+                 signature_str: str,
+                 input_signal_array: List[Event],
+                 trade_combo: strategy.TradeCombos,
+                 warmup_length: int,
+                 initial_capital: float = 100.0,
+                 order_manager: brokerinterface.OrderManagerBase = None) -> None:
+        self._strategy_name = 'BuyIncreaseSellDecreasePlus'
+
+    def make_order_decision(self) -> Dict[str, float]:
+        signal_name = next(iter(self._signal_storage))
+        weight_1 = 0.0
+        weight_2 = 0.0
+        if self._signal_storage[signal_name][-1] > 0:
+            if self.is_currently_long('combo1'):
+                weight_1 = 0.01
+            else:
+                weight_1 = 0.2
+        else:
+            weight_1 = -0.22
+        if self._signal_storage[signal_name][-1] < 0:
+            if self.is_currently_long('combo2'):
+                weight_2 = 0.01
+            else:
+                weight_2 = 0.2
+        else:
+            weight_2 = -0.22
+        return {'combo1': weight_1, 'combo2': weight_2}
+
+
+def test_backtesting_on_the_fly_signal_strategy():
+    # Read data
+    data_folder = 'Data\\'
+    signal_ticker_name = 'VWO'
+    trade_ticker_names = ['VOO', 'SHY']
+    file_path = os.path.join(os.path.dirname(__file__), data_folder)
+    warmup_length = 5
+    signal_name1 = signal_ticker_name + '_ID_' + str(warmup_length)
+    signal_name2 = signal_ticker_name + '_IDP_' + str(warmup_length)
+    signal_ticker_names = [signal_ticker_name]
+    all_input = datacontainer.DataUtils.aggregate_yahoo_data(signal_ticker_names + trade_ticker_names, file_path)
+
+    # Subscribe to signals
+    signal_info_dict = {}
+    signal_info_dict[signal_name1]\
+        = backtesting.SignalInfo('ID', signal_ticker_names, warmup_length, {})
+    signal_info_dict[signal_name2]\
+        = backtesting.SignalInfo('IDP', signal_ticker_names, warmup_length, {'threshold': 0.05})
+
+    # Subscribe to strategies
+    strategy_info_dict = {}
+    strategy_name = signal_ticker_name + '_BuyIncreaseSellDecrease'
+    strategy_info_dict[strategy_name] = backtesting.StrategyInfo(
+        'BISD',
+        [signal_name1],
+        1, {}, trade_ticker_names, {'combo1': [1.0, -3.0], 'combo2': [-1.0, 2.0]})
+    strategy_info_dict[strategy_name+'Plus'] = backtesting.StrategyInfo(
+        'BISDP',
+        [signal_name2],
+        1, {}, trade_ticker_names, {'combo1': [1.0, -3.0], 'combo2': [-1.0, 2.0]})
+
+    # Create backtester
+    number_path = 1
+    my_backtester = backtesting.Backtester(all_input, trade_ticker_names + signal_ticker_names,
+                                           signal_info_dict, strategy_info_dict,
+                                           number_path)
+    my_backtester.run_backtest()
+    backtest_results = my_backtester.get_results()
+
+    # Check
+    # Actual historical path
+    assert backtest_results[strategy_name][str(backtesting.MetricType.PoorMansSharpeRatio)][0]\
+        == pytest.approx(0.015934, 0.0001)
+    assert backtest_results[strategy_name][str(backtesting.MetricType.MaximumDrawDown)][0]\
+        == pytest.approx(0.39325, 0.0001)
+    assert backtest_results[strategy_name][str(backtesting.MetricType.Return)][0]\
+        == pytest.approx(0.266176, 0.0001)
+    assert backtest_results[strategy_name+'Plus'][str(backtesting.MetricType.PoorMansSharpeRatio)][0]\
+        == pytest.approx(-0.013084, 0.0001)
+    assert backtest_results[strategy_name+'Plus'][str(backtesting.MetricType.MaximumDrawDown)][0]\
+        == pytest.approx(1.05596, 0.0001)
+    assert backtest_results[strategy_name+'Plus'][str(backtesting.MetricType.Return)][0]\
+        == pytest.approx(6.1448, 0.0001)
+

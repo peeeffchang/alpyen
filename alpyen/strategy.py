@@ -343,6 +343,8 @@ class StrategyBase(ABC):
         """
         Send pending orders and use latest price to calculate average cost.
         """
+        if self._combo_order is None:
+            return
         for combo_name, amount in self._combo_order.items():
             if combo_name in self._combo_def:
                 combo_def = self._combo_def[combo_name]
@@ -380,6 +382,8 @@ class StrategyBase(ABC):
         """
         Send pending orders to broker.
         """
+        if self._combo_order is None:
+            return
         contract_array = [self._order_manager.get_event_contract_dict()[i.name()] for i in self._contract_array]
         for combo_name, amount in self._combo_order.items():
             if combo_name in self._combo_def:
