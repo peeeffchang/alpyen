@@ -82,24 +82,24 @@ def test_backtesting_macrossing_reshuffle():
     # Check
     # Actual historical path
     assert backtest_results[strategy_name][str(backtesting.MetricType.PoorMansSharpeRatio)][0]\
-           == pytest.approx(0.09503, 0.0001)
+        == pytest.approx(0.09503, 0.0001)
     assert backtest_results[strategy_name][str(backtesting.MetricType.MaximumDrawDown)][0]\
-           == pytest.approx(0.11913, 0.0001)
+        == pytest.approx(0.11913, 0.0001)
     assert backtest_results[strategy_name][str(backtesting.MetricType.Return)][0]\
-           == pytest.approx(0.74978, 0.0001)
+        == pytest.approx(0.74978, 0.0001)
     # All (including simulated) paths
     assert statistics.mean(backtest_results[strategy_name][str(backtesting.MetricType.PoorMansSharpeRatio)])\
-           == pytest.approx(0.105, 0.05)
+        == pytest.approx(0.105, 0.05)
     assert statistics.stdev(backtest_results[strategy_name][str(backtesting.MetricType.PoorMansSharpeRatio)])\
-           == pytest.approx(0.0308, 0.05)
+        == pytest.approx(0.0308, 0.05)
     assert statistics.mean(backtest_results[strategy_name][str(backtesting.MetricType.MaximumDrawDown)])\
-           == pytest.approx(0.152, 0.05)
+        == pytest.approx(0.152, 0.05)
     assert statistics.stdev(backtest_results[strategy_name][str(backtesting.MetricType.MaximumDrawDown)])\
-           == pytest.approx(0.0611, 0.05)
+        == pytest.approx(0.0611, 0.05)
     assert statistics.mean(backtest_results[strategy_name][str(backtesting.MetricType.Return)])\
-           == pytest.approx(0.865, 0.05)
+        == pytest.approx(0.865, 0.05)
     assert statistics.stdev(backtest_results[strategy_name][str(backtesting.MetricType.Return)])\
-           == pytest.approx(0.326, 0.05)
+        == pytest.approx(0.326, 0.05)
 
 
 def test_backtesting_macrossing_resample():
@@ -139,24 +139,24 @@ def test_backtesting_macrossing_resample():
     # Check
     # Actual historical path
     assert backtest_results[strategy_name][str(backtesting.MetricType.PoorMansSharpeRatio)][0]\
-           == pytest.approx(0.09503, 0.0001)
+        == pytest.approx(0.09503, 0.0001)
     assert backtest_results[strategy_name][str(backtesting.MetricType.MaximumDrawDown)][0]\
-           == pytest.approx(0.11913, 0.0001)
+        == pytest.approx(0.11913, 0.0001)
     assert backtest_results[strategy_name][str(backtesting.MetricType.Return)][0]\
-           == pytest.approx(0.74978, 0.0001)
+        == pytest.approx(0.74978, 0.0001)
     # All (including simulated) paths
     assert statistics.mean(backtest_results[strategy_name][str(backtesting.MetricType.PoorMansSharpeRatio)])\
-           == pytest.approx(0.105, 0.05)
+        == pytest.approx(0.105, 0.05)
     assert statistics.stdev(backtest_results[strategy_name][str(backtesting.MetricType.PoorMansSharpeRatio)])\
-           == pytest.approx(0.0308, 0.10)
+        == pytest.approx(0.0308, 0.10)
     assert statistics.mean(backtest_results[strategy_name][str(backtesting.MetricType.MaximumDrawDown)])\
-           == pytest.approx(0.152, 0.05)
+        == pytest.approx(0.152, 0.05)
     assert statistics.stdev(backtest_results[strategy_name][str(backtesting.MetricType.MaximumDrawDown)])\
-           == pytest.approx(0.0552, 0.10)
+        == pytest.approx(0.0552, 0.10)
     assert statistics.mean(backtest_results[strategy_name][str(backtesting.MetricType.Return)])\
-           == pytest.approx(0.865, 0.05)
+        == pytest.approx(0.865, 0.05)
     assert statistics.stdev(backtest_results[strategy_name][str(backtesting.MetricType.Return)])\
-           == pytest.approx(0.326, 0.05)
+        == pytest.approx(0.326, 0.05)
 
 
 def test_backtesting_vaa():
@@ -191,11 +191,11 @@ def test_backtesting_vaa():
     # Check
     # Actual historical path
     assert backtest_results[strategy_name][str(backtesting.MetricType.PoorMansSharpeRatio)][0]\
-           == pytest.approx(0.08549, 0.0001)
+        == pytest.approx(0.08549, 0.0001)
     assert backtest_results[strategy_name][str(backtesting.MetricType.MaximumDrawDown)][0]\
-           == pytest.approx(0.08114, 0.0001)
+        == pytest.approx(0.08114, 0.0001)
     assert backtest_results[strategy_name][str(backtesting.MetricType.Return)][0]\
-           == pytest.approx(1.01538, 0.0001)
+        == pytest.approx(1.01538, 0.0001)
 
 
 # Signal and Strategy for on-the-fly signal and strategy test
@@ -335,15 +335,15 @@ def test_backtesting_on_the_fly_signal_strategy():
     # Check
     # Actual historical path
     assert backtest_results[strategy_name][str(backtesting.MetricType.PoorMansSharpeRatio)][0]\
-           == pytest.approx(0.015934, 0.0001)
+        == pytest.approx(0.015934, 0.0001)
     assert backtest_results[strategy_name][str(backtesting.MetricType.MaximumDrawDown)][0]\
-           == pytest.approx(0.39325, 0.0001)
+        == pytest.approx(0.39325, 0.0001)
     assert backtest_results[strategy_name][str(backtesting.MetricType.Return)][0]\
-           == pytest.approx(0.266176, 0.0001)
+        == pytest.approx(0.266176, 0.0001)
     assert backtest_results[strategy_name+'Plus'][str(backtesting.MetricType.PoorMansSharpeRatio)][0]\
-           == pytest.approx(-0.013084, 0.0001)
+        == pytest.approx(-0.013084, 0.0001)
     assert backtest_results[strategy_name+'Plus'][str(backtesting.MetricType.MaximumDrawDown)][0]\
-           == pytest.approx(1.05596, 0.0001)
+        == pytest.approx(1.05596, 0.0001)
     assert backtest_results[strategy_name+'Plus'][str(backtesting.MetricType.Return)][0]\
-           == pytest.approx(6.1448, 0.0001)
+        == pytest.approx(6.1448, 0.0001)
 
