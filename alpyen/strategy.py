@@ -154,7 +154,8 @@ class StrategyBase(ABC):
                  trade_combo: TradeCombos,
                  warmup_length: int,
                  initial_capital: float = 100.0,
-                 order_manager: brokerinterface.OrderManagerBase = None) -> None:
+                 order_manager: brokerinterface.OrderManagerBase = None,
+                 **kwargs) -> None:
         pass
 
     def _initialize_signal_time_storage(self, input_signal_array: List[Event]) -> None:

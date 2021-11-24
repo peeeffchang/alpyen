@@ -11,16 +11,6 @@ from . import datacontainer
 from . import utils
 
 
-class BrokerAPIBase:
-    """Base class for broker API handle."""
-
-    def __init__(self, broker_api_handle) -> None:
-        self._handle = broker_api_handle
-
-    def get_handle(self):
-        return self._handle
-
-
 class BrokerEventRelayBase:
     """
     Base class for broker event relay.
@@ -28,7 +18,7 @@ class BrokerEventRelayBase:
 
     def __init__(self,
                  data_name: str,
-                 field_name: str = 'close',
+                 ohlc: utils.PriceOHLCType = utils.PriceOHLCType.Close
                  ) -> None:
         """
         Initialize broker event relay.
@@ -37,42 +27,22 @@ class BrokerEventRelayBase:
         ----------
         data_name: str
             Name of the input data.
-        field_name: str
-            Data field name (open, high, low, close, volume, etc.).
+        ohlc: utils.PriceOHLCType
+            OHLC name (open, high, low, close, volume, etc.).
         """
         self._relay_event = Event(data_name)
-        self._field_name = field_name
+        self._ohlc = ohlc
         self._data_name = data_name
 
     def get_event(self) -> Event:
         return self._relay_event
 
 
-class ContractType(enum.Enum):
-    """
-    Enum class for contract type.
-    """
-    Stock = 1
-    Option = 2
-    Future = 3
-    FX = 4
-    Index = 5
-
-
-class PriceDataType(enum.Enum):
-    """
-    Enum class for price data type.
-    """
-    Bid = 1
-    Ask = 2
-    Mid = 3
-
-
 class BrokerContractBase:
     """Base class for contract."""
 
     def __init__(self,
-                 type_: ContractType,
+                 type_: utils.ContractType,
                  symbol: str,
                  strike: Optional[float],
                  expiry: Optional[date]) -> None:
@@ -101,11 +71,27 @@ class BrokerContractBase:
         pass
 
     @abstractmethod
-    def _type_translation(self, type_: ContractType) -> str:
+    def _type_translation(self, type_: utils.ContractType) -> str:
         pass
 
     def get_contract(self):
         return self._contract
+
+
+class BrokerAPIBase:
+    """Base class for broker API handle."""
+
+    def __init__(self, broker_api_handle) -> None:
+        self._handle = broker_api_handle
+
+    def get_handle(self):
+        return self._handle
+
+    @abstractmethod
+    def request_live_bars(self,
+                          contract: BrokerContractBase,
+                          price_type: utils.PriceBidAskType):
+        pass
 
 
 class IBBrokerAPI(BrokerAPIBase):
@@ -129,7 +115,7 @@ class IBBrokerAPI(BrokerAPIBase):
 
         def __init__(self,
                      data_name: str,
-                     field_name: str
+                     ohlc: utils.PriceOHLCType = utils.PriceOHLCType.Close
                      ) -> None:
             """
             Initialize IB event relay.
@@ -138,10 +124,10 @@ class IBBrokerAPI(BrokerAPIBase):
             ----------
             data_name: str
                 Name of the input data.
-            field_name: str
-                Data field name (open, high, low, close, volume, etc.).
+            ohlc: utils.PriceOHLCType
+                OHLC name (open, high, low, close, volume, etc.).
             """
-            super().__init__(data_name, field_name)
+            super().__init__(data_name, ohlc)
 
         # TBD: Add different relay member functions (open, high, low, close, volume)
         def live_bar(self,
@@ -158,7 +144,7 @@ class IBBrokerAPI(BrokerAPIBase):
                 Whether there is new bar.
             """
             if has_new_bar:
-                if self._field_name == 'close':
+                if self._ohlc == utils.PriceOHLCType.Close:
                     field = bars[-1].close
                 else:
                     raise TypeError('IBBrokerEventRelay.live_bar: Unsupported data field type.')
@@ -169,14 +155,14 @@ class IBBrokerAPI(BrokerAPIBase):
         """Class for IB contracts."""
 
         def __init__(self,
-                     type_: ContractType,
+                     type_: utils.ContractType,
                      symbol: str,
                      strike: Optional[float] = None,
                      expiry: Optional[date] = None) -> None:
             super().__init__(type_, symbol, strike, expiry)
 
         def _create_contract(self):
-            if self._type == self._type_translation(ContractType.FX):
+            if self._type == self._type_translation(utils.ContractType.FX):
                 return ibi.contract.Forex(self._symbol)
             else:
                 return ibi.contract.Contract(symbol=self._symbol,
@@ -185,23 +171,23 @@ class IBBrokerAPI(BrokerAPIBase):
                                              else self._expiry.strftime('%Y%m%d'),
                                              strike=0.0 if self._strike is None else self._strike)
 
-        def _type_translation(self, type_: ContractType) -> str:
-            if type_ == ContractType.Stock:
+        def _type_translation(self, type_: utils.ContractType) -> str:
+            if type_ == utils.ContractType.Stock:
                 return 'STK'
-            elif type_ == ContractType.Option:
+            elif type_ == utils.ContractType.Option:
                 return 'OPT'
-            elif type_ == ContractType.FX:
+            elif type_ == utils.ContractType.FX:
                 return 'CASH'
-            elif type_ == ContractType.Future:
+            elif type_ == utils.ContractType.Future:
                 return 'FUT'
-            elif type_ == ContractType.Index:
+            elif type_ == utils.ContractType.Index:
                 return 'IND'
             else:
                 raise ValueError('IBBrokerContract._type_translation: Type not implemented.')
 
     def request_live_bars(self,
                           contract: IBBrokerContract,
-                          price_type: PriceDataType):
+                          price_type: utils.PriceBidAskType):
         """
         Request live price data bars.
 
@@ -209,12 +195,12 @@ class IBBrokerAPI(BrokerAPIBase):
         ----------
         contract: IBBrokerContract
             IB contract.
-        price_type: PriceDataType
+        price_type: utils.PriceBidAskType
             Price type.
         """
-        ib_price_type_dict: Dict[PriceDataType, str] = {PriceDataType.Bid: 'BID',
-                                                        PriceDataType.Ask: 'ASK',
-                                                        PriceDataType.Mid: 'MIDPOINT'}
+        ib_price_type_dict: Dict[utils.PriceBidAskType, str] = {utils.PriceBidAskType.Bid: 'BID',
+                                                              utils.PriceBidAskType.Ask: 'ASK',
+                                                              utils.PriceBidAskType.Mid: 'MIDPOINT'}
         return self.get_handle().reqRealTimeBars(contract.get_contract(), 5, ib_price_type_dict[price_type], False)
 
 
