@@ -14,8 +14,7 @@ class LiveTrader:
     """
 
     def __init__(self,
-                 broker_api: brokerinterface.BrokerAPIBase,
-                 data_api: brokerinterface.BrokerAPIBase,
+                 broker_api_signature: str,
                  signal_info: Dict[str, utils.SignalInfo],
                  strategy_info: Dict[str, utils.StrategyInfo],
                  ) -> None:
@@ -24,34 +23,32 @@ class LiveTrader:
 
         Parameters
         ----------
-        broker_api: brokerinterface.BrokerAPIBase
-            Broker API.
-        data_api: brokerinterface.BrokerAPIBase
-            Data source API.
+        broker_api_signature: str
+            Broker API signature.
         signal_info: Dict[str, utils.SignalInfo]
             Information for building signals.
         strategy_info: Dict[str, utils.StrategyInfo]
             Information for building strategies.
         """
-        self._broker = broker_api
-        self._data_source = data_api
+        self._broker = brokerinterface.BrokerAPIBase(broker_api_signature)
         self._signal_info = signal_info
         self._strategy_info = strategy_info
+        self._portfolio_manager = {}
+        self._order_manager = {}
+        self._strategy_dict = {}
+        self.contract_dict = {}
 
     def get_broker(self) -> brokerinterface.BrokerAPIBase:
         return self._broker
-
-    def get_data_source(self) -> brokerinterface.BrokerAPIBase:
-        return self._data_source
 
     def start_trading(self) -> None:
         """
         Start live trading.
         """
-        self.get_broker().get_handle().connect()
+        self.get_broker().connect()
 
         # Create contracts
-        contract_dict = self.create_contract_dict()
+        self.contract_dict = self.create_contract_dict()
 
         # Create broker relays
         relay_dict = self.create_relay_dict()
@@ -63,15 +60,18 @@ class LiveTrader:
         signal_dict = self.create_signal_dict(data_event_dict)
 
         # Subscribe to data
-        for name, contract in contract_dict.items():
+        for name, contract in self.contract_dict.items():
             # TBD: Allow for bid or ask
-            live_bar = self._data_source.request_live_bars(contract, brokerinterface.PriceBidAskType.Mid)
+            live_bar = self.get_broker().request_live_bars(contract, utils.PriceBidAskType.Mid)
             live_bar.updateEvent += relay_dict[name].live_bar
 
         # Create strategies
-        portfolio_manager = brokerinterface.PortfolioManagerBase(self.get_broker())
-        order_manager = brokerinterface.OrderManagerBase(self.get_broker(), portfolio_manager, contract_dict)
-        strategy_dict = self.create_strategy_dict(signal_dict, data_event_dict, order_manager)
+        self._portfolio_manager = brokerinterface.PortfolioManagerBase(self.get_broker().get_class_signature(),
+                                                                 self.get_broker())
+        self._order_manager = brokerinterface.OrderManagerBase(self.get_broker().get_class_signature(),
+                                                               self.get_broker(), self._portfolio_manager,
+                                                               self.contract_dict)
+        self._strategy_dict = self.create_strategy_dict(signal_dict, data_event_dict, self._order_manager)
 
     def create_contract_dict(self) -> Dict[str, brokerinterface.BrokerContractBase]:
         """Create contract dictionary."""
@@ -79,7 +79,8 @@ class LiveTrader:
         for k_signal, v_signal in self._signal_info.items():
             for contract_type, input_name in zip(v_signal.get_contract_types(), v_signal.get_input_names()):
                 if input_name not in output_dict:
-                    output_dict[input_name] = brokerinterface.BrokerContractBase(contract_type, input_name)
+                    output_dict[input_name] = brokerinterface.BrokerContractBase(
+                        self.get_broker().get_class_signature(), contract_type, input_name)
         return output_dict
 
     def create_relay_dict(self) -> Dict[str, brokerinterface.BrokerEventRelayBase]:
@@ -88,7 +89,8 @@ class LiveTrader:
         for k_signal, v_signal in self._signal_info.items():
             for price_type, input_name in zip(v_signal.get_price_ohlc_types(), v_signal.get_input_names()):
                 if input_name not in output_dict:
-                    output_dict[input_name] = brokerinterface.BrokerEventRelayBase(input_name, price_type)
+                    output_dict[input_name] = brokerinterface.BrokerEventRelayBase(
+                        self.get_broker().get_class_signature(), input_name, price_type)
         return output_dict
 
     def create_signal_dict(self,
@@ -127,6 +129,8 @@ class LiveTrader:
             Signal dictionary.
         data_event_dict: Dict[str, Event]
             Data event dictionary.
+        order_manager: brokerinterface.OrderManagerBase
+            Order manager object.
         """
         output_dict: Dict[str, strategy.StrategyBase] = {}
         strategy_info_dict: Dict[str, utils.StrategyInfo] = self._strategy_info
@@ -144,3 +148,53 @@ class LiveTrader:
                                                    trade_combos, v.get_warmup_length(), **v.get_custom_params(),
                                                    order_manager=order_manager)
         return output_dict
+
+    def switch_all_strategies_on_off(self, activity: bool) -> None:
+        """
+        Turn on / off all strategies.
+
+        Parameters
+        ----------
+        activity: bool
+            True to turn on; False to turn off.
+        """
+        for value in self._strategy_dict.values():
+            value.set_strategy_active(activity)
+
+    def switch_strategy_on_off(self, strategy_name: str, activity: bool) -> None:
+        """
+        Turn on / off a specific strategy.
+
+        Parameters
+        ----------
+        strategy_name: str
+            Name of the strategy.
+        activity: bool
+            True to turn on; False to turn off.
+        """
+        self._strategy_dict[strategy_name].set_strategy_active(activity)
+
+    def liquidate_all(self) -> None:
+        """
+        Liquidate all holdings (only those holdings portfolio manager is aware of).
+
+        Note that:
+        - All strategies would be switched off
+        - There is no guarantee that the book would be clean after running this function
+            - Some positions can be outside alpyen
+            - Some positions can be dangling order when this function is triggered
+        """
+        current_holdings = self._portfolio_manager.contract_info_df
+
+        # Switch off all strategies
+        self.switch_all_strategies_on_off(False)
+
+        # Go through the holdings and do unwind trades
+        for _, holding in current_holdings.iterrows():
+            # Retrieve contract
+            contract_to_trade = self.contract_dict[holding['symbol'].iloc[0]]
+            trade_object = self._order_manager.order_wrapper(contract_to_trade, -holding['position'].iloc[0])
+
+        # Clear all records in portfolio manager
+        self._portfolio_manager.portfolio_info_df = self._portfolio_manager.portfolio_info_df[0:0]
+        self._portfolio_manager.contract_info_df = self._portfolio_manager.contract_info_df[0:0]

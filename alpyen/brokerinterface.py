@@ -1,7 +1,6 @@
 # This should be the only file that accesses broker api
 from abc import abstractmethod
 from datetime import date
-import enum
 from eventkit import Event
 import ib_insync as ibi  # For Interactive Brokers (IB)
 import pandas as pd
@@ -15,24 +14,57 @@ class BrokerEventRelayBase:
     """
     Base class for broker event relay.
     """
+    _broker_relay_classes_registry = {}
 
-    def __init__(self,
-                 data_name: str,
-                 ohlc: utils.PriceOHLCType = utils.PriceOHLCType.Close
-                 ) -> None:
+    _broker_relay_signature = None
+
+    @classmethod
+    def __init_subclass__(cls, **kwargs):
+        super().__init_subclass__(**kwargs)
+        if cls._broker_relay_signature is None:
+            raise KeyError('BrokerEventRelayBase: Missing signature for ' + str(cls))
+        elif cls._broker_relay_signature in cls._broker_relay_classes_registry:
+            raise KeyError('BrokerEventRelayBase: Conflict in signature ' + cls._broker_relay_signature)
+        else:
+            cls._broker_relay_classes_registry[cls._broker_relay_signature] = cls
+
+    @classmethod
+    def get_class_registry(cls):
+        return cls._broker_relay_classes_registry
+
+    def __new__(cls,
+                signature_str: str,
+                data_name: str,
+                ohlc: utils.PriceOHLCType = utils.PriceOHLCType.Close
+                ):
         """
         Initialize broker event relay.
 
         Parameters
         ----------
+        signature_str: str
+            Unique signature of the relay class.
         data_name: str
             Name of the input data.
         ohlc: utils.PriceOHLCType
             OHLC name (open, high, low, close, volume, etc.).
         """
-        self._relay_event = Event(data_name)
-        self._ohlc = ohlc
-        self._data_name = data_name
+        if signature_str not in cls.get_class_registry():
+            raise ValueError('BrokerEventRelayBase.__new__: ' + signature_str + ' is not a valid key.')
+
+        my_relay_obj = super().__new__(cls.get_class_registry()[signature_str])
+
+        my_relay_obj._relay_event = Event(data_name)
+        my_relay_obj._ohlc = ohlc
+        my_relay_obj._data_name = data_name
+
+        return my_relay_obj
+
+    def __init__(self,
+                 signature_str: str,
+                 data_name: str,
+                 ohlc: utils.PriceOHLCType = utils.PriceOHLCType.Close) -> None:
+        pass
 
     def get_event(self) -> Event:
         return self._relay_event
@@ -40,17 +72,37 @@ class BrokerEventRelayBase:
 
 class BrokerContractBase:
     """Base class for contract."""
+    _broker_contract_classes_registry = {}
 
-    def __init__(self,
-                 type_: utils.ContractType,
-                 symbol: str,
-                 strike: Optional[float],
-                 expiry: Optional[date]) -> None:
+    _broker_contract_signature = None
+
+    @classmethod
+    def __init_subclass__(cls, **kwargs):
+        super().__init_subclass__(**kwargs)
+        if cls._broker_contract_signature is None:
+            raise KeyError('BrokerContractBase: Missing signature for ' + str(cls))
+        elif cls._broker_contract_signature in cls._broker_contract_classes_registry:
+            raise KeyError('BrokerContractBase: Conflict in signature ' + cls._broker_contract_signature)
+        else:
+            cls._broker_contract_classes_registry[cls._broker_contract_signature] = cls
+
+    @classmethod
+    def get_class_registry(cls):
+        return cls._broker_contract_classes_registry
+
+    def __new__(cls,
+                signature_str: str,
+                type_: utils.ContractType,
+                symbol: str,
+                strike: Optional[float] = None,
+                expiry: Optional[date] = None):
         """
         Initialize broker contract.
 
         Parameters
         ----------
+        signature_str: str
+            Unique signature of the contract class.
         type_: ContractType
             Contract type.
         symbol: str
@@ -60,18 +112,33 @@ class BrokerContractBase:
         expiry: Optional[date]
             Expiry (optional).
         """
-        self._type = self._type_translation(type_)
-        self._symbol = symbol
-        self._strike = strike
-        self._expiry = expiry
-        self._contract = self._create_contract()
+        if signature_str not in cls.get_class_registry():
+            raise ValueError('BrokerContractBase.__new__: ' + signature_str + ' is not a valid key.')
 
-    @abstractmethod
-    def _create_contract(self):
+        my_contract_obj = super().__new__(cls.get_class_registry()[signature_str])
+
+        my_contract_obj._type = my_contract_obj.type_translation(type_)
+        my_contract_obj._symbol = symbol
+        my_contract_obj._strike = strike
+        my_contract_obj._expiry = expiry
+        my_contract_obj._contract = my_contract_obj.create_contract()
+
+        return my_contract_obj
+
+    def __init__(self,
+                 signature_str: str,
+                 type_: utils.ContractType,
+                 symbol: str,
+                 strike: Optional[float] = None,
+                 expiry: Optional[date] = None) -> None:
         pass
 
     @abstractmethod
-    def _type_translation(self, type_: utils.ContractType) -> str:
+    def create_contract(self):
+        pass
+
+    @abstractmethod
+    def type_translation(self, type_: utils.ContractType) -> str:
         pass
 
     def get_contract(self):
@@ -80,9 +147,38 @@ class BrokerContractBase:
 
 class BrokerAPIBase:
     """Base class for broker API handle."""
+    _broker_api_classes_registry = {}
 
-    def __init__(self, broker_api_handle) -> None:
-        self._handle = broker_api_handle
+    _broker_api_signature = None
+
+    @classmethod
+    def __init_subclass__(cls, **kwargs):
+        super().__init_subclass__(**kwargs)
+        if cls._broker_api_signature is None:
+            raise KeyError('BrokerAPIBase: Missing signature for ' + str(cls))
+        elif cls._broker_api_signature in cls._broker_api_classes_registry:
+            raise KeyError('BrokerAPIBase: Conflict in signature ' + cls._broker_api_signature)
+        else:
+            cls._broker_api_classes_registry[cls._broker_api_signature] = cls
+
+    @classmethod
+    def get_class_registry(cls):
+        return cls._broker_api_classes_registry
+
+    def get_class_signature(self):
+        return self._broker_api_signature
+
+    def __new__(cls,
+                signature_str: str):
+        if signature_str not in cls.get_class_registry():
+            raise ValueError('BrokerAPIBase.__new__: ' + signature_str + ' is not a valid key.')
+
+        my_api_obj = super().__new__(cls.get_class_registry()[signature_str])
+        return my_api_obj
+
+    def __init__(self,
+                 signature_str: str) -> None:
+        pass
 
     def get_handle(self):
         return self._handle
@@ -97,9 +193,11 @@ class BrokerAPIBase:
 class IBBrokerAPI(BrokerAPIBase):
     """Class for IB API handle."""
 
-    def __init__(self) -> None:
+    _broker_api_signature = 'IB'
+
+    def __init__(self, signature_str: str) -> None:
         ibi.util.startLoop()
-        super().__init__(ibi.IB())
+        self._handle = ibi.IB()
 
     def connect(self,
                 address: str = '127.0.0.1',
@@ -112,8 +210,10 @@ class IBBrokerAPI(BrokerAPIBase):
 
     class IBBrokerEventRelay(BrokerEventRelayBase):
         """IB event relay"""
+        _broker_relay_signature = 'IB'
 
         def __init__(self,
+                     signature_str: str,
                      data_name: str,
                      ohlc: utils.PriceOHLCType = utils.PriceOHLCType.Close
                      ) -> None:
@@ -122,12 +222,14 @@ class IBBrokerAPI(BrokerAPIBase):
 
             Parameters
             ----------
+            signature_str: str
+                Unique signature of the relay class.
             data_name: str
                 Name of the input data.
             ohlc: utils.PriceOHLCType
                 OHLC name (open, high, low, close, volume, etc.).
             """
-            super().__init__(data_name, ohlc)
+            pass
 
         # TBD: Add different relay member functions (open, high, low, close, volume)
         def live_bar(self,
@@ -153,16 +255,18 @@ class IBBrokerAPI(BrokerAPIBase):
 
     class IBBrokerContract(BrokerContractBase):
         """Class for IB contracts."""
+        _broker_contract_signature = 'IB'
 
         def __init__(self,
+                     signature_str: str,
                      type_: utils.ContractType,
                      symbol: str,
                      strike: Optional[float] = None,
                      expiry: Optional[date] = None) -> None:
-            super().__init__(type_, symbol, strike, expiry)
+            pass
 
-        def _create_contract(self):
-            if self._type == self._type_translation(utils.ContractType.FX):
+        def create_contract(self):
+            if self._type == self.type_translation(utils.ContractType.FX):
                 return ibi.contract.Forex(self._symbol)
             else:
                 return ibi.contract.Contract(symbol=self._symbol,
@@ -171,7 +275,7 @@ class IBBrokerAPI(BrokerAPIBase):
                                              else self._expiry.strftime('%Y%m%d'),
                                              strike=0.0 if self._strike is None else self._strike)
 
-        def _type_translation(self, type_: utils.ContractType) -> str:
+        def type_translation(self, type_: utils.ContractType) -> str:
             if type_ == utils.ContractType.Stock:
                 return 'STK'
             elif type_ == utils.ContractType.Option:
@@ -183,7 +287,7 @@ class IBBrokerAPI(BrokerAPIBase):
             elif type_ == utils.ContractType.Index:
                 return 'IND'
             else:
-                raise ValueError('IBBrokerContract._type_translation: Type not implemented.')
+                raise ValueError('IBBrokerContract.type_translation: Type not implemented.')
 
     def request_live_bars(self,
                           contract: IBBrokerContract,
@@ -199,8 +303,8 @@ class IBBrokerAPI(BrokerAPIBase):
             Price type.
         """
         ib_price_type_dict: Dict[utils.PriceBidAskType, str] = {utils.PriceBidAskType.Bid: 'BID',
-                                                              utils.PriceBidAskType.Ask: 'ASK',
-                                                              utils.PriceBidAskType.Mid: 'MIDPOINT'}
+                                                                utils.PriceBidAskType.Ask: 'ASK',
+                                                                utils.PriceBidAskType.Mid: 'MIDPOINT'}
         return self.get_handle().reqRealTimeBars(contract.get_contract(), 5, ib_price_type_dict[price_type], False)
 
 
@@ -216,24 +320,58 @@ class PortfolioManagerBase:
     * Provide holding info for strategies to decide on whether to trade
     """
 
-    def __init__(self,
-                 broker_api: BrokerAPIBase) -> None:
+    _broker_portfolio_manager_classes_registry = {}
+
+    _broker_portfolio_manager_signature = None
+
+    @classmethod
+    def __init_subclass__(cls, **kwargs):
+        super().__init_subclass__(**kwargs)
+        if cls._broker_portfolio_manager_signature is None:
+            raise KeyError('PortfolioManagerBase: Missing signature for ' + str(cls))
+        elif cls._broker_portfolio_manager_signature in cls._broker_portfolio_manager_classes_registry:
+            raise KeyError('PortfolioManagerBase: Conflict in signature ' + cls._broker_portfolio_manager_signature)
+        else:
+            cls._broker_portfolio_manager_classes_registry[cls._broker_portfolio_manager_signature] = cls
+
+    @classmethod
+    def get_class_registry(cls):
+        return cls._broker_portfolio_manager_classes_registry
+
+    def __new__(cls,
+                signature_str: str,
+                broker_api: BrokerAPIBase):
         """
         Initialize portfolio manager.
 
         Parameters
         ----------
+        signature_str: str
+            Unique signature of the portfolio manager class.
         broker_api: BrokerAPIBase
             Broker API.
         """
-        self._broker_handle = broker_api.get_handle()
+        if signature_str not in cls.get_class_registry():
+            raise ValueError('PortfolioManagerBase.__new__: ' + signature_str + ' is not a valid key.')
+
+        my_portfolio_manager_obj = super().__new__(cls.get_class_registry()[signature_str])
+
+        my_portfolio_manager_obj._broker_handle = broker_api.get_handle()
 
         # Create dataframes for storing information
-        self.portfolio_info_df = pd.DataFrame(columns=['strategy_name', 'combo_name',
-                                                       'combo_position', 'combo_entry_price',
-                                                       'combo_mtm_price', 'unrealized_pnl',
-                                                       'realized_pnl'])
-        self.contract_info_df = pd.DataFrame(columns=['symbol', 'type', 'exchange', 'currency', 'position'])
+        my_portfolio_manager_obj.portfolio_info_df = pd.DataFrame(columns=['strategy_name', 'combo_name',
+                                                                           'combo_position', 'combo_entry_price',
+                                                                           'combo_mtm_price', 'unrealized_pnl',
+                                                                           'realized_pnl'])
+        my_portfolio_manager_obj.contract_info_df = pd.DataFrame(columns=['symbol', 'type', 'exchange',
+                                                                          'currency', 'position'])
+
+        return my_portfolio_manager_obj
+
+    def __init__(self,
+                 signature_str: str,
+                 broker_api: BrokerAPIBase) -> None:
+        pass
 
     def update_combo_mtm_price(self, combo_mtm: pd.DataFrame):
         """
@@ -304,18 +442,22 @@ class PortfolioManagerBase:
 
 class IBPortfolioManager(PortfolioManagerBase):
     """IB portfolio manager."""
+    _broker_portfolio_manager_signature = 'IB'
 
     def __init__(self,
+                 signature_str: str,
                  broker_api: IBBrokerAPI) -> None:
         """
         Initialize portfolio manager.
 
         Parameters
         ----------
+        signature_str: str
+            Unique signature of the portfolio manager class.
         broker_api: IBBrokerAPI
             IB Broker API.
         """
-        super().__init__(broker_api)
+        pass
 
     def portfolio_update(self, ) -> None:
         pass
@@ -445,15 +587,36 @@ class OrderManagerBase:
     * Keeping track of dangling (i.e. unconfirmed) orders
     """
 
-    def __init__(self,
-                 broker_api: BrokerAPIBase,
-                 portfolio_manager: PortfolioManagerBase,
-                 event_contract_dict: Dict[str, BrokerContractBase]) -> None:
+    _broker_order_manager_classes_registry = {}
+
+    _broker_order_manager_signature = None
+
+    @classmethod
+    def __init_subclass__(cls, **kwargs):
+        super().__init_subclass__(**kwargs)
+        if cls._broker_order_manager_signature is None:
+            raise KeyError('OrderManagerBase: Missing signature for ' + str(cls))
+        elif cls._broker_order_manager_signature in cls._broker_order_manager_classes_registry:
+            raise KeyError('OrderManagerBase: Conflict in signature ' + cls._broker_order_manager_signature)
+        else:
+            cls._broker_order_manager_classes_registry[cls._broker_order_manager_signature] = cls
+
+    @classmethod
+    def get_class_registry(cls):
+        return cls._broker_order_manager_classes_registry
+
+    def __new__(cls,
+                signature_str: str,
+                broker_api: BrokerAPIBase,
+                portfolio_manager: PortfolioManagerBase,
+                event_contract_dict: Dict[str, BrokerContractBase]):
         """
         Initialize order manager.
 
         Parameters
         ----------
+        signature_str: str
+            Unique signature of the order manager class.
         broker_api: BrokerAPIBase
             Broker API.
         portfolio_manager: PortfolioManagerBase
@@ -461,20 +624,34 @@ class OrderManagerBase:
         event_contract_dict: Dict[str, BrokerContractBase]
             A dictionary allowing for mapping to contracts.
         """
-        self._broker_handle = broker_api.get_handle()
-        self._portfolio_manager = portfolio_manager
+        if signature_str not in cls.get_class_registry():
+            raise ValueError('OrderManagerBase.__new__: ' + signature_str + ' is not a valid key.')
+
+        my_order_manager_obj = super().__new__(cls.get_class_registry()[signature_str])
+
+        my_order_manager_obj._broker_handle = broker_api.get_handle()
+        my_order_manager_obj._portfolio_manager = portfolio_manager
 
         # Create dataframes for storing information
-        self.order_info_df = pd.DataFrame(columns=['strategy_name', 'combo_name', 'contract_index',
-                                                   'combo_unit', 'dangling_order', 'entry_price',
-                                                   'order_id', 'time_stamp'])
+        my_order_manager_obj.order_info_df = pd.DataFrame(columns=['strategy_name', 'combo_name', 'contract_index',
+                                                                   'combo_unit', 'dangling_order', 'entry_price',
+                                                                   'order_id', 'time_stamp'])
 
-        self._strategy_contracts: Dict[
+        my_order_manager_obj._strategy_contracts: Dict[
             str, List[BrokerContractBase]] = {}  # A dictionary { strategy_name: contract_array }
-        self._combo_weight: Dict[
+        my_order_manager_obj._combo_weight: Dict[
             (str, str), List[float]] = {}  # A dictionary { (strategy_name, combo_name): combo_weight }
 
-        self._event_contract_dict = event_contract_dict
+        my_order_manager_obj._event_contract_dict = event_contract_dict
+
+        return my_order_manager_obj
+
+    def __init__(self,
+                 signature_str: str,
+                 broker_api: IBBrokerAPI,
+                 portfolio_manager: IBPortfolioManager,
+                 event_contract_dict: Dict[str, IBBrokerAPI.IBBrokerContract]) -> None:
+        pass
 
     def get_event_contract_dict(self):
         return self._event_contract_dict
@@ -538,11 +715,18 @@ class OrderManagerBase:
                             **kwargs) -> None:
         pass
 
+    @abstractmethod
+    def order_wrapper(self, **kwargs):
+        pass
+
 
 class IBOrderManager(OrderManagerBase):
     """IB order manager."""
 
+    _broker_order_manager_signature = 'IB'
+
     def __init__(self,
+                 signature_str: str,
                  broker_api: IBBrokerAPI,
                  portfolio_manager: IBPortfolioManager,
                  event_contract_dict: Dict[str, IBBrokerAPI.IBBrokerContract]) -> None:
@@ -551,6 +735,8 @@ class IBOrderManager(OrderManagerBase):
 
         Parameters
         ----------
+        signature_str: str
+            Unique signature of the order manager class.
         broker_api: IBBrokerAPI
             IB Broker API.
         portfolio_manager: IBPortfolioManager
@@ -558,7 +744,7 @@ class IBOrderManager(OrderManagerBase):
         event_contract_dict: Dict[str, IBBrokerAPI.IBBrokerContract]
             A dictionary allowing for mapping to contracts.
         """
-        super().__init__(broker_api, portfolio_manager, event_contract_dict)
+        pass
 
     def register_combo_level_info(self,
                                   strategy_name: str,
@@ -581,6 +767,31 @@ class IBOrderManager(OrderManagerBase):
         """
         self._strategy_contracts[strategy_name] = contract_array
         self._combo_weight[(strategy_name, combo_name)] = weight_array
+
+    def order_wrapper(self,
+                      contract: IBBrokerAPI.IBBrokerContract,
+                      order_amount: float,
+                      order_type: str = 'MKT'):
+        """
+        Wrapper for the broker's order function.
+
+        Parameters
+        ----------
+        contract: IBBrokerAPI.IBBrokerContract
+            Contract to be traded.
+        order_amount: float
+            Amount to trade.
+        order_type: str
+            Order type.
+        """
+        buy_sell: str = 'BUY' if order_amount > utils.EPSILON else 'SELL'
+        if order_type == 'MKT':
+            ib_order = ibi.order.MarketOrder(buy_sell, abs(order_amount))
+            trade_object = self._broker_handle.placeOrder(contract.get_contract(), ib_order)
+            return trade_object
+        else:
+            # TBD: Support other order types
+            raise ValueError('IBOrderManager.order_wrapper: Order type ' + order_type + ' is supported.')
 
     def place_order(self,
                     strategy_name: str,
@@ -611,11 +822,7 @@ class IBOrderManager(OrderManagerBase):
         order_notional = unit * self._combo_weight[(strategy_name, combo_name)][contract_index]
         if abs(order_notional) > utils.EPSILON:
             # Update order status
-            buy_sell: str = 'BUY' if order_notional > utils.EPSILON else 'SELL'
-            # TBD: Other order types
-            # TBD: Need re-writing with brokerinterface
-            ib_order = ibi.order.MarketOrder(buy_sell, order_notional)
-            trade_object = self._broker_handle.placeOrder(contract.get_contract(), ib_order)
+            trade_object = self.order_wrapper(contract.get_contract(), order_notional)
             trade_object.statusEvent += self.update_order_status
 
             self.order_info_df = self.order_info_df.append({'strategy_name': strategy_name,
