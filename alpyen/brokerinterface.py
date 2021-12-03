@@ -189,6 +189,14 @@ class BrokerAPIBase:
                           price_type: utils.PriceBidAskType):
         pass
 
+    @abstractmethod
+    def connect(self, **kwargs) -> None:
+        pass
+
+    @abstractmethod
+    def disconnect(self) -> None:
+        pass
+
 
 class IBBrokerAPI(BrokerAPIBase):
     """Class for IB API handle."""

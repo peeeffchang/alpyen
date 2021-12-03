@@ -80,6 +80,11 @@ class Backtester:
             data_event_dict: Dict[str, Event] = {}
             for name in self._names:
                 data_event_dict[name] = Event(name)
+            # In case there are traded contracts that are not in any signal
+            for k, v in self._strategy_info.items():
+                for i in range(len(v.get_contract_names())):
+                    if v.get_contract_names()[i] not in data_event_dict:
+                        data_event_dict[v.get_contract_names()[i]] = Event(v.get_contract_names()[i])
 
             # Create signals
             signal_dict = self.create_signal_dict(data_event_dict)

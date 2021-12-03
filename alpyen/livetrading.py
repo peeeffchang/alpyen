@@ -38,8 +38,14 @@ class LiveTrader:
         self._strategy_dict = {}
         self.contract_dict = {}
 
+    def get_portfolio_manager(self) -> brokerinterface.PortfolioManagerBase:
+        return self._portfolio_manager
+
     def get_broker(self) -> brokerinterface.BrokerAPIBase:
         return self._broker
+
+    def disconnect(self) -> None:
+        self.get_broker().disconnect()
 
     def start_trading(self) -> None:
         """
@@ -67,11 +73,14 @@ class LiveTrader:
 
         # Create strategies
         self._portfolio_manager = brokerinterface.PortfolioManagerBase(self.get_broker().get_class_signature(),
-                                                                 self.get_broker())
+                                                                       self.get_broker())
         self._order_manager = brokerinterface.OrderManagerBase(self.get_broker().get_class_signature(),
                                                                self.get_broker(), self._portfolio_manager,
                                                                self.contract_dict)
         self._strategy_dict = self.create_strategy_dict(signal_dict, data_event_dict, self._order_manager)
+
+        # DEBUG
+        self.get_broker().get_handle().sleep(500)
 
     def create_contract_dict(self) -> Dict[str, brokerinterface.BrokerContractBase]:
         """Create contract dictionary."""
@@ -81,6 +90,14 @@ class LiveTrader:
                 if input_name not in output_dict:
                     output_dict[input_name] = brokerinterface.BrokerContractBase(
                         self.get_broker().get_class_signature(), contract_type, input_name)
+
+        # In case there are traded contracts that are not in any signal
+        strategy_info_dict: Dict[str, utils.StrategyInfo] = self._strategy_info
+        for k, v in strategy_info_dict.items():
+            for i in range(len(v.get_contract_names())):
+                if v.get_contract_names()[i] not in output_dict:
+                    output_dict[v.get_contract_names()[i]] = brokerinterface.BrokerContractBase(
+                        self.get_broker().get_class_signature(), v.get_contract_types()[i], v.get_contract_names()[i])
         return output_dict
 
     def create_relay_dict(self) -> Dict[str, brokerinterface.BrokerEventRelayBase]:
@@ -91,6 +108,15 @@ class LiveTrader:
                 if input_name not in output_dict:
                     output_dict[input_name] = brokerinterface.BrokerEventRelayBase(
                         self.get_broker().get_class_signature(), input_name, price_type)
+
+        # In case there are traded contracts that are not in any signal
+        strategy_info_dict: Dict[str, utils.StrategyInfo] = self._strategy_info
+        for k, v in strategy_info_dict.items():
+            for i in range(len(v.get_contract_names())):
+                if v.get_contract_names()[i] not in output_dict:
+                    # OK to default to close price for mtm
+                    output_dict[v.get_contract_names()[i]] = brokerinterface.BrokerEventRelayBase(
+                        self.get_broker().get_class_signature(), v.get_contract_names()[i], utils.PriceOHLCType.Close)
         return output_dict
 
     def create_signal_dict(self,

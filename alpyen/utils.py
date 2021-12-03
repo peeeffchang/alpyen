@@ -100,6 +100,7 @@ class StrategyInfo:
                  warmup_length: int,
                  custom_params: Dict,
                  contract_names: List[str],
+                 contract_types: List[ContractType] = None,
                  combo_definition: Dict[str, List[float]] = None) -> None:
         """
         Initialize strategy info
@@ -116,14 +117,24 @@ class StrategyInfo:
             Other strategy specific parameters.
         contract_names: List[str]
             Contract names for TradeCombos creation.
+        contract_types: List[ContractType]
+            Contract types.
         combo_definition: Dict[str, List[float]]
             Weight dictionay for TradeCombos creation.
         """
+        # Check input integrity
+        if contract_types is not None:
+            assert len(contract_names) == len(contract_types),\
+                'Contract names and contract types have different lengths.'
+        for k, v in combo_definition.items():
+            assert len(v) == len(contract_names), 'Contract names and definition for ' + k + ' have different lengths.'
+
         self._input_names = input_names
         self._warmup_length = warmup_length
         self._custom_params = custom_params
         self._strategy_signature = strategy_signature
         self._contract_names = contract_names
+        self._contract_types = contract_types
         self._combo_definition = combo_definition
 
     def get_input_names(self) -> List[str]:
@@ -137,6 +148,9 @@ class StrategyInfo:
 
     def get_contract_names(self) -> List[str]:
         return self._contract_names
+
+    def get_contract_types(self) -> List[ContractType]:
+        return self._contract_types
 
     def get_combo_definition(self) -> Dict[str, List[float]]:
         return self._combo_definition
