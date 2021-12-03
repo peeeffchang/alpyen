@@ -37,6 +37,7 @@ class LiveTrader:
         self._order_manager = {}
         self._strategy_dict = {}
         self.contract_dict = {}
+        self._is_trading: bool = True
 
     def get_portfolio_manager(self) -> brokerinterface.PortfolioManagerBase:
         return self._portfolio_manager
@@ -47,11 +48,17 @@ class LiveTrader:
     def disconnect(self) -> None:
         self.get_broker().disconnect()
 
-    def start_trading(self) -> None:
+    def get_is_trading(self) -> bool:
+        return self._is_trading
+
+    def stop_trading(self) -> None:
+        self._is_trading = False
+
+    async def start_trading(self) -> None:
         """
         Start live trading.
         """
-        self.get_broker().connect()
+        self.get_broker().connect(is_async=False)
 
         # Create contracts
         self.contract_dict = self.create_contract_dict()
@@ -79,8 +86,8 @@ class LiveTrader:
                                                                self.contract_dict)
         self._strategy_dict = self.create_strategy_dict(signal_dict, data_event_dict, self._order_manager)
 
-        # DEBUG
-        self.get_broker().get_handle().sleep(500)
+        while self.get_is_trading():
+            self.get_broker().get_handle().sleep(10)
 
     def create_contract_dict(self) -> Dict[str, brokerinterface.BrokerContractBase]:
         """Create contract dictionary."""

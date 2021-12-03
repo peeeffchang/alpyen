@@ -2,6 +2,7 @@
 
 """Tests for `alpyen` package."""
 
+import asyncio
 from eventkit import Event
 import os
 import pytest
@@ -469,13 +470,20 @@ def test_live_trading():
     # Create live trader
     my_trader = livetrading.LiveTrader('IB', signal_info_dict, strategy_info_dict)
 
-    my_trader.start_trading()
+    loop = asyncio.get_event_loop()
+    try:
+        asyncio.ensure_future(my_trader.start_trading())
+        loop.run_forever()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        print("Closing Loop")
+        loop.close()
 
-    my_trader.get_broker().get_handle().sleep(500)
 
 def test_live_trading_manual():
     ib_api = brokerinterface.BrokerAPIBase('IB')
-    ib_api.connect(port=4002)
+    ib_api.connect(port=4002, is_async=False)
 
     # Contracts
     input_data_names = ['EURUSD', 'GBPUSD', 'CHFUSD']
