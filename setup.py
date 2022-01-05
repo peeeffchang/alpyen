@@ -10,7 +10,7 @@ with open('README.rst') as readme_file:
 with open('HISTORY.rst') as history_file:
     history = history_file.read()
 
-requirements = ['Click>=7.0', 'ib-insync', 'eventkit', 'pandas' ]
+requirements = ['Click>=7.0', 'ib-insync', 'eventkit', 'pandas', 'asyncio' ]
 
 test_requirements = ['pytest>=3', ]
 
@@ -44,6 +44,6 @@ setup(
     test_suite='tests',
     tests_require=test_requirements,
     url='https://github.com/peeeffchang/alpyen',
-    version='0.1.4',
+    version='0.1.5',
     zip_safe=False,
 )
