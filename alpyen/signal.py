@@ -63,7 +63,8 @@ class SignalBase(ABC):
     def __init__(self,
                  signature_str: str,
                  input_data_array: List[Event],
-                 warmup_length: int) -> None:
+                 warmup_length: int,
+                 **kwargs) -> None:
         pass
 
     def _initialize_data_time_storage(self, input_data_array: List[Event]) -> None:

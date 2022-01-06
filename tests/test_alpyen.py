@@ -14,8 +14,10 @@ from alpyen import datacontainer
 from alpyen import backtesting
 from alpyen import brokerinterface
 from alpyen import cli
+from alpyen import livetrading
 from alpyen import signal
 from alpyen import strategy
+from alpyen import utils
 
 
 @pytest.fixture
@@ -60,20 +62,20 @@ def test_backtesting_macrossing_reshuffle():
     # Subscribe to signals
     signal_info_dict = {}
     signal_info_dict[short_lookback_name]\
-        = backtesting.SignalInfo('MA', ticker_names, short_lookback, {})
+        = utils.SignalInfo('MA', ticker_names, [], [], short_lookback, {})
     signal_info_dict[long_lookback_name]\
-        = backtesting.SignalInfo('MA', ticker_names, long_lookback, {})
+        = utils.SignalInfo('MA', ticker_names, [], [], long_lookback, {})
 
     # Subscribe to strategies
     strategy_info_dict = {}
     strategy_name = ticker_name + '_MACrossing_01'
-    strategy_info_dict[strategy_name] = backtesting.StrategyInfo(
+    strategy_info_dict[strategy_name] = utils.StrategyInfo(
         'MACrossing',
         [short_lookback_name, long_lookback_name],
-        1, {}, ticker_names, {'combo1': [1.0]})
+        1, {}, ticker_names, combo_definition={'combo1': [1.0]})
 
     # Create backtester
-    number_path = 1000
+    number_path = 4000
     my_backtester = backtesting.Backtester(all_input, ticker_names, signal_info_dict, strategy_info_dict,
                                            number_path)
     my_backtester.run_backtest()
@@ -82,24 +84,24 @@ def test_backtesting_macrossing_reshuffle():
     # Check
     # Actual historical path
     assert backtest_results[strategy_name][str(backtesting.MetricType.PoorMansSharpeRatio)][0]\
-        == pytest.approx(0.09503, 0.0001)
+           == pytest.approx(0.09503, 0.0001)
     assert backtest_results[strategy_name][str(backtesting.MetricType.MaximumDrawDown)][0]\
-        == pytest.approx(0.11913, 0.0001)
+           == pytest.approx(0.11913, 0.0001)
     assert backtest_results[strategy_name][str(backtesting.MetricType.Return)][0]\
-        == pytest.approx(0.74978, 0.0001)
+           == pytest.approx(0.74978, 0.0001)
     # All (including simulated) paths
     assert statistics.mean(backtest_results[strategy_name][str(backtesting.MetricType.PoorMansSharpeRatio)])\
-        == pytest.approx(0.105, 0.05)
+           == pytest.approx(0.105, 0.05)
     assert statistics.stdev(backtest_results[strategy_name][str(backtesting.MetricType.PoorMansSharpeRatio)])\
-        == pytest.approx(0.0308, 0.05)
+           == pytest.approx(0.0308, 0.10)
     assert statistics.mean(backtest_results[strategy_name][str(backtesting.MetricType.MaximumDrawDown)])\
-        == pytest.approx(0.152, 0.05)
+           == pytest.approx(0.152, 0.05)
     assert statistics.stdev(backtest_results[strategy_name][str(backtesting.MetricType.MaximumDrawDown)])\
-        == pytest.approx(0.0611, 0.05)
+           == pytest.approx(0.0611, 0.05)
     assert statistics.mean(backtest_results[strategy_name][str(backtesting.MetricType.Return)])\
-        == pytest.approx(0.865, 0.05)
+           == pytest.approx(0.865, 0.05)
     assert statistics.stdev(backtest_results[strategy_name][str(backtesting.MetricType.Return)])\
-        == pytest.approx(0.326, 0.05)
+           == pytest.approx(0.326, 0.05)
 
 
 def test_backtesting_macrossing_resample():
@@ -117,20 +119,20 @@ def test_backtesting_macrossing_resample():
     # Subscribe to signals
     signal_info_dict = {}
     signal_info_dict[short_lookback_name]\
-        = backtesting.SignalInfo('MA', ticker_names, short_lookback, {})
+        = utils.SignalInfo('MA', ticker_names, [], [], short_lookback, {})
     signal_info_dict[long_lookback_name]\
-        = backtesting.SignalInfo('MA', ticker_names, long_lookback, {})
+        = utils.SignalInfo('MA', ticker_names, [], [], long_lookback, {})
 
     # Subscribe to strategies
     strategy_info_dict = {}
     strategy_name = ticker_name + '_MACrossing_01'
-    strategy_info_dict[strategy_name] = backtesting.StrategyInfo(
+    strategy_info_dict[strategy_name] = utils.StrategyInfo(
         'MACrossing',
         [short_lookback_name, long_lookback_name],
-        1, {}, ticker_names, {'combo1': [1.0]})
+        1, {}, ticker_names, combo_definition={'combo1': [1.0]})
 
     # Create backtester
-    number_path = 1000
+    number_path = 4000
     my_backtester = backtesting.Backtester(all_input, ticker_names, signal_info_dict, strategy_info_dict,
                                            number_path)
     my_backtester.run_backtest(backtesting.PathGenerationType.ReturnResampling)
@@ -152,7 +154,7 @@ def test_backtesting_macrossing_resample():
     assert statistics.mean(backtest_results[strategy_name][str(backtesting.MetricType.MaximumDrawDown)])\
         == pytest.approx(0.152, 0.05)
     assert statistics.stdev(backtest_results[strategy_name][str(backtesting.MetricType.MaximumDrawDown)])\
-        == pytest.approx(0.0552, 0.10)
+        == pytest.approx(0.06088, 0.10)
     assert statistics.mean(backtest_results[strategy_name][str(backtesting.MetricType.Return)])\
         == pytest.approx(0.865, 0.05)
     assert statistics.stdev(backtest_results[strategy_name][str(backtesting.MetricType.Return)])\
@@ -170,16 +172,16 @@ def test_backtesting_vaa():
     signal_info_dict = {}
     lookback = 253
     for ticker in ticker_names:
-        signal_info_dict[ticker + '_WM_1'] = backtesting.SignalInfo('WM', [ticker], lookback, {})
+        signal_info_dict[ticker + '_WM_1'] = utils.SignalInfo('WM', [ticker], [], [], lookback, {})
 
     # Subscribe to strategies
     strategy_info_dict = {}
     strategy_name = '4ETF_VAA_01'
-    strategy_info_dict[strategy_name] = backtesting.StrategyInfo(
+    strategy_info_dict[strategy_name] = utils.StrategyInfo(
         'VAA', [ticker + '_WM_1' for ticker in ticker_names],
         1, {'risk_on_size': 4, 'num_assets_to_hold': 2,
             'breadth_protection_threshold': 1, 'weighting_scheme': strategy.WeightingScheme.Equal},
-        ticker_names, {'combo1': [1.0] * len(ticker_names)})
+        ticker_names, combo_definition={'combo1': [1.0] * len(ticker_names)})
 
     # Create backtester
     number_path = 1
@@ -191,12 +193,11 @@ def test_backtesting_vaa():
     # Check
     # Actual historical path
     assert backtest_results[strategy_name][str(backtesting.MetricType.PoorMansSharpeRatio)][0]\
-        == pytest.approx(0.08549, 0.0001)
+           == pytest.approx(0.08549, 0.0001)
     assert backtest_results[strategy_name][str(backtesting.MetricType.MaximumDrawDown)][0]\
-        == pytest.approx(0.08114, 0.0001)
+           == pytest.approx(0.08114, 0.0001)
     assert backtest_results[strategy_name][str(backtesting.MetricType.Return)][0]\
-        == pytest.approx(1.01538, 0.0001)
-
+           == pytest.approx(1.01538, 0.0001)
 
 # Signal and Strategy for on-the-fly signal and strategy test
 class IncreaseDecrease(signal.SignalBase):
@@ -308,21 +309,21 @@ def test_backtesting_on_the_fly_signal_strategy():
     # Subscribe to signals
     signal_info_dict = {}
     signal_info_dict[signal_name1]\
-        = backtesting.SignalInfo('ID', signal_ticker_names, warmup_length, {})
+        = utils.SignalInfo('ID', signal_ticker_names, [], [], warmup_length, {})
     signal_info_dict[signal_name2]\
-        = backtesting.SignalInfo('IDP', signal_ticker_names, warmup_length, {'threshold': 0.05})
+        = utils.SignalInfo('IDP', signal_ticker_names, [], [], warmup_length, {'threshold': 0.05})
 
     # Subscribe to strategies
     strategy_info_dict = {}
     strategy_name = signal_ticker_name + '_BuyIncreaseSellDecrease'
-    strategy_info_dict[strategy_name] = backtesting.StrategyInfo(
+    strategy_info_dict[strategy_name] = utils.StrategyInfo(
         'BISD',
         [signal_name1],
-        1, {}, trade_ticker_names, {'combo1': [1.0, -3.0], 'combo2': [-1.0, 2.0]})
-    strategy_info_dict[strategy_name+'Plus'] = backtesting.StrategyInfo(
+        1, {}, trade_ticker_names, combo_definition={'combo1': [1.0, -3.0], 'combo2': [-1.0, 2.0]})
+    strategy_info_dict[strategy_name+'Plus'] = utils.StrategyInfo(
         'BISDP',
         [signal_name2],
-        1, {}, trade_ticker_names, {'combo1': [1.0, -3.0], 'combo2': [-1.0, 2.0]})
+        1, {}, trade_ticker_names, combo_definition={'combo1': [1.0, -3.0], 'combo2': [-1.0, 2.0]})
 
     # Create backtester
     number_path = 1
@@ -347,3 +348,172 @@ def test_backtesting_on_the_fly_signal_strategy():
     assert backtest_results[strategy_name+'Plus'][str(backtesting.MetricType.Return)][0]\
         == pytest.approx(6.1448, 0.0001)
 
+
+# Signal and Strategy for debugging live trading
+class TempSignal(signal.SignalBase):
+    _signal_signature = 'TS'
+
+    def __init__(self,
+                 signature_str: str,
+                 input_data_array: List[Event],
+                 warmup_length: int) -> None:
+        self._signal_name = input_data_array[0].name() + "_TS_" + str(warmup_length)
+        self._signal_event = Event(self._signal_name)
+
+    def calculate_signal(self) -> int:
+        prices = self.get_data_by_name(self._input_data_array[0].name())
+        return round(prices[-1] / 0.00001, 0) % 10
+
+
+class TempStrategy(strategy.StrategyBase):
+    _strategy_signature = 'TempStrategy'
+
+    def __init__(self,
+                 signature_str: str,
+                 input_signal_array: List[Event],
+                 trade_combo: strategy.TradeCombos,
+                 warmup_length: int,
+                 initial_capital: float = 100.0,
+                 order_manager: brokerinterface.OrderManagerBase = None) -> None:
+        self._strategy_name = 'My temp strategy'
+
+    def make_order_decision(self) -> Dict[str, float]:
+        signal_name = next(iter(self._signal_storage))
+        if 2 > self._signal_storage[signal_name][-1] >= 0:
+            return {'combo_1': 2.0}
+        elif 4 > self._signal_storage[signal_name][-1] >= 2:
+            return {'combo_1': -2.0}
+        elif 6 > self._signal_storage[signal_name][-1] >= 4:
+            return {'combo_2': 3.0}
+        elif 8 > self._signal_storage[signal_name][-1] >= 6:
+            return {'combo_2': -3.0}
+        else:
+            return {'combo_3': 1.0}
+
+
+def test_backtesting_traded_contracts_not_in_signal():
+    # In this scenario, some of the traded contracts are not used in any signal
+
+    # Read data
+    data_folder = 'Data\\'
+    input_tickers = ['BBH']
+    trade_tickers = ['VWO', 'VEA', 'BND']
+    file_path = os.path.join(os.path.dirname(__file__), data_folder)
+    all_input = datacontainer.DataUtils.aggregate_yahoo_data(input_tickers + trade_tickers, file_path)
+
+    # Subscribe to signals
+    signal_info_dict = {}
+    for ticker in input_tickers:
+        signal_info_dict[ticker + '_TS_1'] = utils.SignalInfo('TS', [ticker],
+                                                              [utils.ContractType.FX],
+                                                              [utils.PriceOHLCType.Close], 2, {})
+
+    # Subscribe to strategies
+    strategy_info_dict = {}
+    strategy_name = 'Temp_Strategy'
+    trade_combo = {'combo_1': [-0.3, 0.6, 0.0],
+                   'combo_2': [-0.6, 0.0, -0.2],
+                   'combo_3': [0.0, -0.6, 0.2]}
+    strategy_info_dict[strategy_name] = utils.StrategyInfo(
+        'TempStrategy',
+        [ticker + '_TS_1' for ticker in input_tickers],
+        1,
+        {},
+        trade_tickers,
+        [utils.ContractType.FX] * 3,
+        trade_combo)
+
+    # Create backtester
+    number_path = 1
+    my_backtester = backtesting.Backtester(all_input, input_tickers, signal_info_dict,
+                                           strategy_info_dict, number_path)
+    my_backtester.run_backtest()
+    backtest_results = my_backtester.get_results()
+
+    # Check
+    # Actual historical path
+    assert backtest_results[strategy_name][str(backtesting.MetricType.PoorMansSharpeRatio)][0]\
+           == pytest.approx(0.05691, 0.0001)
+    assert backtest_results[strategy_name][str(backtesting.MetricType.MaximumDrawDown)][0]\
+           == pytest.approx(0.81409, 0.0001)
+    assert backtest_results[strategy_name][str(backtesting.MetricType.Return)][0]\
+           == pytest.approx(0.20696, 0.0001)
+
+
+def test_live_trading():
+    # Subscribe to signals
+    input_tickers = ['EURUSD']
+    trade_tickers = ['EURUSD', 'GBPUSD', 'CHFUSD']
+    signal_info_dict = {}
+
+    for ticker in input_tickers:
+        signal_info_dict[ticker + '_TS_1'] = utils.SignalInfo('TS', [ticker],
+                                                              [utils.ContractType.FX],
+                                                              [utils.PriceOHLCType.Close], 2, {})
+
+    # Subscribe to strategies
+    strategy_info_dict = {}
+    strategy_name = 'Temp_Strategy'
+    trade_combo = {'combo_1': [-50.0, 100.0, 0.0],
+                   'combo_2': [-100.0, 0.0, -60.0],
+                   'combo_3': [0.0, -100.0, 70.0]}
+    strategy_info_dict[strategy_name] = utils.StrategyInfo(
+        'TempStrategy',
+        [ticker + '_TS_1' for ticker in input_tickers],
+        1,
+        {},
+        trade_tickers,
+        [utils.ContractType.FX] * 3,
+        trade_combo)
+
+    # Create live trader
+    path_to_control_file = 'test_control.yml'
+    my_trader = livetrading.LiveTrader('IB', signal_info_dict, strategy_info_dict, path_to_control_file)
+    my_trader.start_trading()
+
+
+def test_live_trading_manual():
+    ib_api = brokerinterface.BrokerAPIBase('IB')
+    ib_api.connect(port=4002)
+
+    # Contracts
+    input_data_names = ['EURUSD', 'GBPUSD', 'CHFUSD']
+    contracts = [brokerinterface.IBBrokerAPI.IBBrokerContract('IB', utils.ContractType.FX,
+                                                              x) for x in input_data_names]
+
+    # Broker relay
+    bar_relays = [brokerinterface.IBBrokerAPI.IBBrokerEventRelay('IB', x, utils.PriceOHLCType.Close) for x in input_data_names]
+
+    # Signals
+    temp_signal = signal.SignalBase('TS', [bar_relays[0].get_event()], 2)
+
+    # temp_signal_dataslot = signal.DataSlot(input_data_names[0], [temp_signal])
+
+    # Subscription
+    live_bars1 = ib_api.request_live_bars(contracts[0], utils.PriceBidAskType.Mid)
+    live_bars2 = ib_api.request_live_bars(contracts[1], utils.PriceBidAskType.Mid)
+    live_bars3 = ib_api.request_live_bars(contracts[2], utils.PriceBidAskType.Mid)
+
+    # mtm_data = signal.DataSlot(input_data_names[0], [temp_signal])
+
+    live_bars1.updateEvent += bar_relays[0].live_bar
+    live_bars2.updateEvent += bar_relays[1].live_bar
+    live_bars3.updateEvent += bar_relays[2].live_bar
+
+    # Create strategy
+    contract_events = [bar_relay.get_event() for bar_relay in bar_relays]
+
+    trade_combos = strategy.TradeCombos(contract_events,
+                                        {'combo_1': [-50.0, 100.0, 0.0],
+                                         'combo_2': [-100.0, 0.0, -60.0],
+                                         'combo_3': [0.0, -100.0, 70.0]})
+    portfolio_manager = brokerinterface.IBPortfolioManager('IB', ib_api)
+    e_c_dict = dict(zip(input_data_names, contracts))
+    order_manager = brokerinterface.IBOrderManager('IB', ib_api, portfolio_manager, e_c_dict)
+
+    temp_strategy = strategy.StrategyBase(
+        'TempStrategy',
+        [temp_signal.get_signal_event()],
+        trade_combos, 1, order_manager=order_manager)
+
+    ib_api.get_handle().sleep(30)

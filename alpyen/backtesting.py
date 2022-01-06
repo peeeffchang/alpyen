@@ -7,6 +7,7 @@ from typing import List, Dict
 from . import datacontainer
 from . import signal
 from . import strategy
+from . import utils
 
 
 class PathGenerationType(enum.Enum):
@@ -26,102 +27,6 @@ class MetricType(enum.Enum):
     Return = 3
 
 
-class SignalInfo:
-    """
-    class for signal info.
-    """
-    def __init__(self,
-                 signal_signature: str,
-                 input_names: List[str],
-                 warmup_length: int,
-                 custom_params: Dict) -> None:
-        """
-        Initialize signal info
-
-        Parameters
-        ----------
-        signal_signature: str
-            Unique signature of the signal.
-        input_names: List[str]
-            List of inputs the signal is listening to.
-        warmup_length: int
-            Warm-up length.
-        custom_params: Dict
-            Other signal specific parameters.
-        """
-        self._input_names = input_names
-        self._warmup_length = warmup_length
-        self._custom_params = custom_params
-        self._signal_signature = signal_signature
-
-    def get_input_names(self) -> List[str]:
-        return self._input_names
-
-    def get_warmup_length(self) -> int:
-        return self._warmup_length
-
-    def get_custom_params(self) -> Dict:
-        return self._custom_params
-
-    def get_signal_signature(self) -> str:
-        return self._signal_signature
-
-
-class StrategyInfo:
-    """
-    class for strategy info.
-    """
-    def __init__(self,
-                 strategy_signature: str,
-                 input_names: List[str],
-                 warmup_length: int,
-                 custom_params: Dict,
-                 contract_names: List[str],
-                 combo_definition: Dict[str, List[float]] = None) -> None:
-        """
-        Initialize strategy info
-
-        Parameters
-        ----------
-        strategy_signature: str
-            Unique signature of the signal.
-        input_names: List[str]
-            List of inputs the strategy is listening to.
-        warmup_length: int
-            Number of data points to 'burn'
-        custom_params: Dict
-            Other strategy specific parameters.
-        contract_names: List[str]
-            Contract names for TradeCombos creation.
-        combo_definition: Dict[str, List[float]]
-            Weight dictionay for TradeCombos creation.
-        """
-        self._input_names = input_names
-        self._warmup_length = warmup_length
-        self._custom_params = custom_params
-        self._strategy_signature = strategy_signature
-        self._contract_names = contract_names
-        self._combo_definition = combo_definition
-
-    def get_input_names(self) -> List[str]:
-        return self._input_names
-
-    def get_warmup_length(self) -> int:
-        return self._warmup_length
-
-    def get_custom_params(self) -> Dict:
-        return self._custom_params
-
-    def get_contract_names(self) -> List[str]:
-        return self._contract_names
-
-    def get_combo_definition(self) -> Dict[str, List[float]]:
-        return self._combo_definition
-
-    def get_strategy_signature(self) -> str:
-        return self._strategy_signature
-
-
 class Backtester:
     """
     Class for backtester.
@@ -129,8 +34,8 @@ class Backtester:
     def __init__(self,
                  aggregated_input: List[datacontainer.PriceTimeSeries],
                  names: List[str],
-                 signal_info: Dict[str, SignalInfo],
-                 strategy_info: Dict[str, StrategyInfo],
+                 signal_info: Dict[str, utils.SignalInfo],
+                 strategy_info: Dict[str, utils.StrategyInfo],
                  number_simulation: int = 1) -> None:
         """
         Initialize backtester.
@@ -140,10 +45,10 @@ class Backtester:
         aggregated_input: List[PriceTimeSeries]
             All input data used for backtesting.
         names: List[str]
-            Time of the realization of the data point.
-        signal_info: Dict[str, SignalInfo]
+            Data event names.
+        signal_info: Dict[str, utils.SignalInfo]
             Information for building signals.
-        strategy_info: Dict[str, StrategyInfo]
+        strategy_info: Dict[str, utils.StrategyInfo]
             Information for building strategies.
         number_simulation: int
             Number of simulation paths.
@@ -175,6 +80,11 @@ class Backtester:
             data_event_dict: Dict[str, Event] = {}
             for name in self._names:
                 data_event_dict[name] = Event(name)
+            # In case there are traded contracts that are not in any signal
+            for k, v in self._strategy_info.items():
+                for i in range(len(v.get_contract_names())):
+                    if v.get_contract_names()[i] not in data_event_dict:
+                        data_event_dict[v.get_contract_names()[i]] = Event(v.get_contract_names()[i])
 
             # Create signals
             signal_dict = self.create_signal_dict(data_event_dict)
@@ -223,7 +133,7 @@ class Backtester:
             Data event dictionary.
         """
         output_dict: Dict[str, signal.SignalBase] = {}
-        signal_info_dict: Dict[str, SignalInfo] = self._signal_info
+        signal_info_dict: Dict[str, utils.SignalInfo] = self._signal_info
         for k, v in signal_info_dict.items():
             price_event_list: List[Event] = []
             for name_i in v.get_input_names():
@@ -249,7 +159,7 @@ class Backtester:
             Data event dictionary.
         """
         output_dict: Dict[str, strategy.StrategyBase] = {}
-        strategy_info_dict: Dict[str, StrategyInfo] = self._strategy_info
+        strategy_info_dict: Dict[str, utils.StrategyInfo] = self._strategy_info
         for k, v in strategy_info_dict.items():
             price_event_list: List[Event] = []
             for i in range(len(v.get_contract_names())):

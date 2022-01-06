@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
 from collections import deque
 from datetime import timedelta
+from datetime import datetime
 import enum
 from eventkit import Event
 import math
@@ -153,7 +154,8 @@ class StrategyBase(ABC):
                  trade_combo: TradeCombos,
                  warmup_length: int,
                  initial_capital: float = 100.0,
-                 order_manager: brokerinterface.OrderManagerBase = None) -> None:
+                 order_manager: brokerinterface.OrderManagerBase = None,
+                 **kwargs) -> None:
         pass
 
     def _initialize_signal_time_storage(self, input_signal_array: List[Event]) -> None:
@@ -392,18 +394,20 @@ class StrategyBase(ABC):
                                                               contract_array,
                                                               combo_def,
                                                               combo_name)
+                time_stamp = str(datetime.now())
                 for i in range(len(combo_def)):
                     self._order_manager.place_order(self._strategy_name,
                                                     combo_name,
+                                                    time_stamp,
                                                     i,
                                                     contract_array[i],
-                                                    amount)
+                                                    amount
+                                                    )
+                self._combo_positions[combo_name] += amount
             else:
                 # Some strategies do not have predefined combos;
                 # for them we simply place orders for individual contract.
                 raise ValueError('StrategyBase.send_order_live: Non-combo ordering not implemented yet.')
-    # % Record entered combo position locally
-    # obj.positionArr{1, comboId} = obj.positionArr{1, comboId} + comboUnit;
 
     def _calculate_new_average_entry_price(self,
                                            old_average_entry_price: float,
