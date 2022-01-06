@@ -210,12 +210,14 @@ class IBBrokerAPI(BrokerAPIBase):
     def connect(self,
                 address: str = '127.0.0.1',
                 port: int = 4002,
-                client_id: int = 1,
-                is_async: bool = True) -> None:
-        if is_async:
-            self.get_handle().connectAsync(address, port, clientId=client_id)
-        else:
-            self.get_handle().connect(address, port, clientId=client_id)
+                client_id: int = 1) -> None:
+        self.get_handle().connect(address, port, clientId=client_id)
+
+    async def async_connect(self,
+                address: str = '127.0.0.1',
+                port: int = 4002,
+                client_id: int = 1) -> None:
+        await self.get_handle().connectAsync(address, port, clientId=client_id)
 
     def disconnect(self):
         self.get_handle().disconnect()
@@ -799,7 +801,7 @@ class IBOrderManager(OrderManagerBase):
         buy_sell: str = 'BUY' if order_amount > utils.EPSILON else 'SELL'
         if order_type == 'MKT':
             ib_order = ibi.order.MarketOrder(buy_sell, abs(order_amount))
-            trade_object = self._broker_handle.placeOrder(contract.get_contract(), ib_order)
+            trade_object = self._broker_handle.placeOrder(contract, ib_order)
             return trade_object
         else:
             # TBD: Support other order types
