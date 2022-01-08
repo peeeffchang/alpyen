@@ -568,8 +568,11 @@ class IBPortfolioManager(PortfolioManagerBase):
                 position_closed = min(abs(existing_position), abs(combo_unit))
             existing_pnl = (self.portfolio_info_df.loc[(self.portfolio_info_df['strategy_name'] == strategy_name) &
                                                        (self.portfolio_info_df['combo_name'] == combo_name),
-                                                       'realized_pnl'])
-            existing_holding_direction = existing_position / abs(existing_position)
+                                                       'realized_pnl']).iloc[0]
+
+            existing_holding_direction = (existing_position / abs(existing_position)
+                                          if abs(existing_position) > utils.EPSILON else 0.0)
+
             (self.portfolio_info_df.loc[(self.portfolio_info_df['strategy_name'] == strategy_name) &
                                         (self.portfolio_info_df['combo_name'] == combo_name),
                                         'realized_pnl']) = existing_pnl + existing_holding_direction * position_closed\
@@ -876,7 +879,9 @@ class IBOrderManager(OrderManagerBase):
                 return
 
             # Update dangling order status.
-            self.order_info_df.loc[self.order_info_df['order_id'] == order_id, 'dangling_order'] -= filled_amount
+            order_direction = 1.0 if trade.order.action == 'BUY' else -1.0
+            self.order_info_df.loc[self.order_info_df['order_id'] == order_id, 'dangling_order']\
+                -= order_direction * filled_amount
 
             # Record leg entry price
             self.order_info_df.loc[self.order_info_df['order_id'] == order_id, 'entry_price'] = average_fill_price

@@ -40,8 +40,6 @@ class LiveTrader:
         self._broker = brokerinterface.BrokerAPIBase(broker_api_signature)
         self._signal_info = signal_info
         self._strategy_info = strategy_info
-        self._portfolio_manager = {}
-        self._order_manager: brokerinterface.OrderManagerBase = {}
         self._strategy_dict = {}
         self.contract_dict = {}
         self._is_trading: bool = True
