@@ -206,6 +206,9 @@ class StrategyBase(ABC):
     def get_strategy_active(self) -> bool:
         return self._strategy_active
 
+    def get_strategy_name(self) -> str:
+        return self._strategy_name
+
     def set_strategy_active(self, activity: bool) -> None:
         self._strategy_active = activity
 
