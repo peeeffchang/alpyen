@@ -356,13 +356,15 @@ class TempSignal(signal.SignalBase):
     def __init__(self,
                  signature_str: str,
                  input_data_array: List[Event],
-                 warmup_length: int) -> None:
+                 warmup_length: int,
+                 **kwargs) -> None:
         self._signal_name = input_data_array[0].name() + "_TS_" + str(warmup_length)
         self._signal_event = Event(self._signal_name)
+        self._num_sig_fig = kwargs['num_sig_fig']
 
     def calculate_signal(self) -> int:
         prices = self.get_data_by_name(self._input_data_array[0].name())
-        return round(prices[-1] / 0.00001, 0) % 10
+        return round(prices[-1] / prices[-2] * (10.0 ** self._num_sig_fig), 0) % 10
 
 
 class TempStrategy(strategy.StrategyBase):
@@ -406,7 +408,7 @@ def test_backtesting_traded_contracts_not_in_signal():
     for ticker in input_tickers:
         signal_info_dict[ticker + '_TS_1'] = utils.SignalInfo('TS', [ticker],
                                                               [utils.ContractType.FX],
-                                                              [utils.PriceOHLCType.Close], 2, {})
+                                                              [utils.PriceOHLCType.Close], 2, {'num_sig_fig': 5})
 
     # Subscribe to strategies
     strategy_info_dict = {}
@@ -433,23 +435,58 @@ def test_backtesting_traded_contracts_not_in_signal():
     # Check
     # Actual historical path
     assert backtest_results[strategy_name][str(backtesting.MetricType.PoorMansSharpeRatio)][0]\
-           == pytest.approx(0.05691, 0.0001)
+           == pytest.approx(0.04791, 0.0001)
     assert backtest_results[strategy_name][str(backtesting.MetricType.MaximumDrawDown)][0]\
-           == pytest.approx(0.81409, 0.0001)
+           == pytest.approx(0.69536, 0.0001)
     assert backtest_results[strategy_name][str(backtesting.MetricType.Return)][0]\
-           == pytest.approx(0.20696, 0.0001)
+           == pytest.approx(0.42129, 0.0001)
 
 
 def test_live_trading():
     # Subscribe to signals
-    input_tickers = ['EURUSD']
+    input_tickers = ['USDJPY']
+    trade_tickers = ['EURUSD', 'GBPUSD']
+    signal_info_dict = {}
+
+    warmup_length = 2
+    signal_name = input_tickers[0] + '_ID_' + str(warmup_length)
+    signal_info_dict[signal_name]\
+        = utils.SignalInfo('ID',
+                           input_tickers,
+                           [utils.ContractType.FX],
+                           [utils.PriceOHLCType.Close],
+                           warmup_length,
+                           {})
+
+    # Subscribe to strategies
+    strategy_info_dict = {}
+    strategy_name = 'BISD'
+    trade_combo = {'combo1': [1000.0, -3000.0], 'combo2': [-1000.0, 2000.0]}
+    strategy_info_dict[strategy_name] = utils.StrategyInfo(
+        'BISD',
+        [signal_name],
+        1,
+        {},
+        trade_tickers,
+        [utils.ContractType.FX] * 2,
+        trade_combo)
+
+    # Create live trader
+    path_to_control_file = 'test_control.yml'
+    my_trader = livetrading.LiveTrader('IB', signal_info_dict, strategy_info_dict, path_to_control_file)
+    my_trader.start_trading()
+
+
+def test_live_trading_2():
+    # Subscribe to signals
+    input_tickers = ['USDJPY']
     trade_tickers = ['EURUSD', 'GBPUSD', 'CHFUSD']
     signal_info_dict = {}
 
     for ticker in input_tickers:
         signal_info_dict[ticker + '_TS_1'] = utils.SignalInfo('TS', [ticker],
                                                               [utils.ContractType.FX],
-                                                              [utils.PriceOHLCType.Close], 2, {})
+                                                              [utils.PriceOHLCType.Close], 2, {'num_sig_fig': 5})
 
     # Subscribe to strategies
     strategy_info_dict = {}
@@ -470,50 +507,3 @@ def test_live_trading():
     path_to_control_file = 'test_control.yml'
     my_trader = livetrading.LiveTrader('IB', signal_info_dict, strategy_info_dict, path_to_control_file)
     my_trader.start_trading()
-
-
-def test_live_trading_manual():
-    ib_api = brokerinterface.BrokerAPIBase('IB')
-    ib_api.connect(port=4002)
-
-    # Contracts
-    input_data_names = ['EURUSD', 'GBPUSD', 'CHFUSD']
-    contracts = [brokerinterface.IBBrokerAPI.IBBrokerContract('IB', utils.ContractType.FX,
-                                                              x) for x in input_data_names]
-
-    # Broker relay
-    bar_relays = [brokerinterface.IBBrokerAPI.IBBrokerEventRelay('IB', x, utils.PriceOHLCType.Close) for x in input_data_names]
-
-    # Signals
-    temp_signal = signal.SignalBase('TS', [bar_relays[0].get_event()], 2)
-
-    # temp_signal_dataslot = signal.DataSlot(input_data_names[0], [temp_signal])
-
-    # Subscription
-    live_bars1 = ib_api.request_live_bars(contracts[0], utils.PriceBidAskType.Mid)
-    live_bars2 = ib_api.request_live_bars(contracts[1], utils.PriceBidAskType.Mid)
-    live_bars3 = ib_api.request_live_bars(contracts[2], utils.PriceBidAskType.Mid)
-
-    # mtm_data = signal.DataSlot(input_data_names[0], [temp_signal])
-
-    live_bars1.updateEvent += bar_relays[0].live_bar
-    live_bars2.updateEvent += bar_relays[1].live_bar
-    live_bars3.updateEvent += bar_relays[2].live_bar
-
-    # Create strategy
-    contract_events = [bar_relay.get_event() for bar_relay in bar_relays]
-
-    trade_combos = strategy.TradeCombos(contract_events,
-                                        {'combo_1': [-50.0, 100.0, 0.0],
-                                         'combo_2': [-100.0, 0.0, -60.0],
-                                         'combo_3': [0.0, -100.0, 70.0]})
-    portfolio_manager = brokerinterface.IBPortfolioManager('IB', ib_api)
-    e_c_dict = dict(zip(input_data_names, contracts))
-    order_manager = brokerinterface.IBOrderManager('IB', ib_api, portfolio_manager, e_c_dict)
-
-    temp_strategy = strategy.StrategyBase(
-        'TempStrategy',
-        [temp_signal.get_signal_event()],
-        trade_combos, 1, order_manager=order_manager)
-
-    ib_api.get_handle().sleep(30)

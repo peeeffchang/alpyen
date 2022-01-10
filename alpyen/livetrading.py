@@ -40,8 +40,6 @@ class LiveTrader:
         self._broker = brokerinterface.BrokerAPIBase(broker_api_signature)
         self._signal_info = signal_info
         self._strategy_info = strategy_info
-        self._portfolio_manager = {}
-        self._order_manager: brokerinterface.OrderManagerBase = {}
         self._strategy_dict = {}
         self.contract_dict = {}
         self._is_trading: bool = True
@@ -140,10 +138,20 @@ class LiveTrader:
             datetime_now = datetime.datetime.now()
             self._run_until = datetime_now\
                 + datetime.timedelta(0, int(instruction_info['activity']['seconds_to_shut_down']))
+
         # Monitoring
         if instruction_info['monitoring']['portfolio'] is not None:
-            if instruction_info['monitoring']['portfolio']:
+            if instruction_info['monitoring']['portfolio'] == 'print':
                 print(self.get_portfolio_manager().get_portfolio_info())
+            elif instruction_info['monitoring']['portfolio'] == 'csv':
+                self.get_portfolio_manager().get_portfolio_info().to_csv('alpyen_portfolio.csv', index=False)
+
+        # Strategies
+        if instruction_info['strategies'] is not None:
+            for strategy_name, dict_for_strategy in instruction_info['strategies'].items():
+                for strategy_attribute, value in dict_for_strategy.items():
+                    if strategy_attribute == 'on_off':
+                        self.switch_strategy_on_off(strategy_name, value)
 
     def create_contract_dict(self) -> Dict[str, brokerinterface.BrokerContractBase]:
         """Create contract dictionary."""
@@ -233,9 +241,10 @@ class LiveTrader:
             signal_event_list: List[Event] = []
             for i in range(len(v.get_input_names())):
                 signal_event_list.append(signal_dict.get(v.get_input_names()[i]).get_signal_event())
-            output_dict[k] = strategy.StrategyBase(v.get_strategy_signature(), signal_event_list,
+            my_strategy = strategy.StrategyBase(v.get_strategy_signature(), signal_event_list,
                                                    trade_combos, v.get_warmup_length(), **v.get_custom_params(),
                                                    order_manager=order_manager)
+            output_dict[my_strategy.get_strategy_name()] = my_strategy
         return output_dict
 
     def switch_all_strategies_on_off(self, activity: bool) -> None:
