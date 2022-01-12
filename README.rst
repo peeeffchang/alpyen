@@ -1,4 +1,4 @@
-<p align="center"><a target="_blank" rel="noopener noreferrer"><img src="docs/images/alpyen_logo.png?raw=true" alt="alpyen logo"></a></p>
+![alpyen logo](docs/images/alpyen_logo.png)
 
 ======
 alpyen
