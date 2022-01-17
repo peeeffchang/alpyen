@@ -197,6 +197,14 @@ class BrokerAPIBase:
     def disconnect(self) -> None:
         pass
 
+    @abstractmethod
+    def get_account_info(self) -> pd.DataFrame:
+        pass
+
+    @abstractmethod
+    def get_portfolio_info(self) -> pd.DataFrame:
+        pass
+
 
 class IBBrokerAPI(BrokerAPIBase):
     """Class for IB API handle."""
@@ -221,6 +229,35 @@ class IBBrokerAPI(BrokerAPIBase):
 
     def disconnect(self):
         self.get_handle().disconnect()
+
+    def get_account_info(self) -> pd.DataFrame:
+        output_df = pd.DataFrame(columns=['Net Value', 'Margin Requirement', 'Buying Power'])
+        account_value_list = self.get_handle().accountSummary()
+        temp_dict = {}
+        for account_value_item in account_value_list:
+            if account_value_item.tag == 'NetLiquidation':
+                temp_dict['Net Value'] = account_value_item.value
+            elif account_value_item.tag == 'MaintMarginReq':
+                temp_dict['Margin Requirement'] = account_value_item.value
+            elif account_value_item.tag == 'BuyingPower':
+                temp_dict['Buying Power'] = account_value_item.value
+        output_df = output_df.append(temp_dict, ignore_index=True)
+        return output_df
+
+    def get_portfolio_info(self) -> pd.DataFrame:
+        output_df = pd.DataFrame(columns=['Security', 'Amount', 'Avg Cost',
+                                          'Mkt Price', 'Realized PnL', 'Unrealized PnL'])
+        my_portfolio = self.get_handle().portfolio()
+        for portfolio_item in my_portfolio:
+            temp_dict = {}
+            temp_dict['Security'] = portfolio_item.contract.symbol
+            temp_dict['Amount'] = portfolio_item.position
+            temp_dict['Avg Cost'] = portfolio_item.averageCost
+            temp_dict['Mkt Price'] = portfolio_item.marketPrice
+            temp_dict['Realized PnL'] = portfolio_item.realizedPNL
+            temp_dict['Unrealized PnL'] = portfolio_item.unrealizedPNL
+            output_df = output_df.append(temp_dict, ignore_index=True)
+        return output_df
 
     class IBBrokerEventRelay(BrokerEventRelayBase):
         """IB event relay"""

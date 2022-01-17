@@ -2,6 +2,7 @@ import asyncio
 from contextlib import contextmanager
 import datetime
 from eventkit import Event
+import json
 from typing import Dict, List
 import yaml
 
@@ -118,33 +119,59 @@ class LiveTrader:
     def carry_out_instruction(self, instruction_info) -> None:
         """Carry out the instruction as specified by the control file."""
         # Activity
-        if instruction_info['activity']['is_active'] is not None:
-            if not instruction_info['activity']['is_active']:
-                # is_active has top priority
+        if instruction_info['activity'] is not None:
+            if instruction_info['activity']['is_active'] is not None:
+                if not instruction_info['activity']['is_active']:
+                    # is_active has top priority
+                    self._is_trading = False
+            elif self._run_until is not None and self._run_until < datetime.datetime.now():
+                # Time to shut down
                 self._is_trading = False
-        elif self._run_until is not None and self._run_until < datetime.datetime.now():
-            # Time to shut down
-            self._is_trading = False
 
-        if ((instruction_info['activity']['run_until'] is not None)
-                and (instruction_info['activity']['seconds_to_shut_down'] is not None)):
-            raise ValueError('LiveTrader.carry_out_instruction: run_until and seconds_to_shut_down '
-                             'cannot be specified simultaneously.')
-        elif instruction_info['activity']['run_until'] is not None:
-            self._run_until = datetime.strptime(instruction_info['activity']['run_until'], '%m/%d/%y %H:%M:%S')
-        elif ((instruction_info['activity']['seconds_to_shut_down'] is not None)
-                and (self._run_until is None)):
-            # We only consider seconds_to_shut_down at start up, otherwise we run into infinite loop
-            datetime_now = datetime.datetime.now()
-            self._run_until = datetime_now\
-                + datetime.timedelta(0, int(instruction_info['activity']['seconds_to_shut_down']))
+            if ((instruction_info['activity']['run_until'] is not None)
+                    and (instruction_info['activity']['seconds_to_shut_down'] is not None)):
+                raise ValueError('LiveTrader.carry_out_instruction: run_until and seconds_to_shut_down '
+                                 'cannot be specified simultaneously.')
+            elif instruction_info['activity']['run_until'] is not None:
+                self._run_until = datetime.strptime(instruction_info['activity']['run_until'], '%m/%d/%y %H:%M:%S')
+            elif ((instruction_info['activity']['seconds_to_shut_down'] is not None)
+                    and (self._run_until is None)):
+                # We only consider seconds_to_shut_down at start up, otherwise we run into infinite loop
+                datetime_now = datetime.datetime.now()
+                self._run_until = datetime_now\
+                    + datetime.timedelta(0, int(instruction_info['activity']['seconds_to_shut_down']))
 
         # Monitoring
-        if instruction_info['monitoring']['portfolio'] is not None:
-            if instruction_info['monitoring']['portfolio'] == 'print':
-                print(self.get_portfolio_manager().get_portfolio_info())
-            elif instruction_info['monitoring']['portfolio'] == 'csv':
-                self.get_portfolio_manager().get_portfolio_info().to_csv('alpyen_portfolio.csv', index=False)
+        if instruction_info['monitoring'] is not None:
+            if instruction_info['monitoring']['by_strategy'] is not None:
+                if instruction_info['monitoring']['by_strategy'] == 'print':
+                    print(self.get_portfolio_manager().get_portfolio_info())
+                elif instruction_info['monitoring']['by_strategy'] == 'csv':
+                    by_strategy_output_file = 'alpyen_portfolio_by_strategy.csv'
+                    with open(by_strategy_output_file, 'a+') as f_bs:
+                        f_bs.write('\n')
+                        self.get_portfolio_manager().get_portfolio_info().to_csv(f_bs,
+                                                                                 index=False,
+                                                                                 mode='a',
+                                                                                 sep='|')
+            if instruction_info['monitoring']['account'] is not None:
+                if instruction_info['monitoring']['account']:
+                    account_output_file = 'alpyen_broker_account.csv'
+                    with open(account_output_file, 'a+') as f_a:
+                        f_a.write('\n')
+                        self.get_broker().get_account_info().to_csv(f_a,
+                                                                    index=False,
+                                                                    mode='a',
+                                                                    sep='|')
+            if instruction_info['monitoring']['portfolio'] is not None:
+                if instruction_info['monitoring']['portfolio']:
+                    portfolio_output_file = 'alpyen_portfolio.csv'
+                    with open(portfolio_output_file, 'a+') as f_p:
+                        f_p.write('\n')
+                        self.get_broker().get_portfolio_info().to_csv(f_p,
+                                                                      index=False,
+                                                                      mode='a',
+                                                                      sep='|')
 
         # Strategies
         if instruction_info['strategies'] is not None:
