@@ -1,3 +1,5 @@
+![alpyen logo](docs/images/alpyen_logo.png)
+
 ======
 alpyen
 ======
