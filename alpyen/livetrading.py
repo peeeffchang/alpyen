@@ -2,7 +2,6 @@ import asyncio
 from contextlib import contextmanager
 import datetime
 from eventkit import Event
-import json
 from typing import Dict, List
 import yaml
 
