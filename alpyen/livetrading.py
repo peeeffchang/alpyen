@@ -233,10 +233,11 @@ class LiveTrader:
             for name_i in v.get_input_names():
                 price_event_list.append(data_event_dict.get(name_i))
             # Create signal
-            output_dict[k] = signal.SignalBase(v.get_signal_signature(),
-                                               price_event_list,
-                                               v.get_warmup_length(),
-                                               **v.get_custom_params())
+            my_signal = signal.SignalBase(v.get_signal_signature(),
+                                          price_event_list,
+                                          v.get_warmup_length(),
+                                          **v.get_custom_params())
+            output_dict[my_signal.get_signal_name()] = my_signal
         return output_dict
 
     def create_strategy_dict(self,
@@ -268,8 +269,8 @@ class LiveTrader:
             for i in range(len(v.get_input_names())):
                 signal_event_list.append(signal_dict.get(v.get_input_names()[i]).get_signal_event())
             my_strategy = strategy.StrategyBase(v.get_strategy_signature(), signal_event_list,
-                                                   trade_combos, v.get_warmup_length(), **v.get_custom_params(),
-                                                   order_manager=order_manager)
+                                                trade_combos, v.get_warmup_length(), **v.get_custom_params(),
+                                                order_manager=order_manager)
             output_dict[my_strategy.get_strategy_name()] = my_strategy
         return output_dict
 
