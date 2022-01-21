@@ -1,4 +1,4 @@
-![alpyen logo](docs/images/alpyen_logo.png)
+.. image:: docs/images/alpyen_logo.png
 
 ======
 alpyen
