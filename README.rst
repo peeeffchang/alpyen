@@ -1,5 +1,7 @@
-.. image:: docs/images/alpyen_logo.png
+.. raw:: html
 
+   <img src="docs/images/alpyen_logo.png" align="right" width="300px" alt="right-aligned logo in README">
+   
 ======
 alpyen
 ======
