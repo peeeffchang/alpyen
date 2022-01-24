@@ -34,6 +34,10 @@ setup(
             'alpyen=alpyen.cli:main',
         ],
     },
+    project_urls={
+        'Documentation': 'https://github.com/peeeffchang/alpyen/blob/main/README.rst',
+        'Source': 'https://github.com/peeeffchang/alpyen/',
+    },
     install_requires=requirements,
     license="GNU General Public License v3",
     long_description=readme + '\n\n' + history,
