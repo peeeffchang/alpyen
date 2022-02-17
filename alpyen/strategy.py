@@ -412,6 +412,10 @@ class StrategyBase(ABC):
                 # for them we simply place orders for individual contract.
                 raise ValueError('StrategyBase.send_order_live: Non-combo ordering not implemented yet.')
 
+    def set_combo_order(self, combo_order: Dict[str, float]) -> None:
+        """Set combo order manually (used exclusively for liquidation)"""
+        self._combo_order = combo_order
+
     def _calculate_new_average_entry_price(self,
                                            old_average_entry_price: float,
                                            new_entry_price: float,

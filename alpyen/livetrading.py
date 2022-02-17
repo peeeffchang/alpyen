@@ -140,6 +140,13 @@ class LiveTrader:
                 self._run_until = datetime_now\
                     + datetime.timedelta(0, int(instruction_info['activity']['seconds_to_shut_down']))
 
+            if instruction_info['activity']['liquidate'] is not None:
+                for strategy_name in instruction_info['activity']['liquidate']:
+                    if strategy_name == 'all':
+                        self.switch_off_and_liquidate_all_strategies()
+                    else:
+                        self.switch_off_and_liquidate_strategy(strategy_name)
+
         # Monitoring
         if instruction_info['monitoring'] is not None:
             if instruction_info['monitoring']['by_strategy'] is not None:
@@ -299,7 +306,7 @@ class LiveTrader:
         """
         self._strategy_dict[strategy_name].set_strategy_active(activity)
 
-    def liquidate_all(self) -> None:
+    def switch_off_and_liquidate_all_strategies(self) -> None:
         """
         Liquidate all holdings (only those holdings portfolio manager is aware of).
 
@@ -309,17 +316,27 @@ class LiveTrader:
             - Some positions can be outside alpyen
             - Some positions can be dangling order when this function is triggered
         """
-        current_holdings = self._portfolio_manager.contract_info_df
+        for strategy_name in self._strategy_dict.keys():
+            self.switch_off_and_liquidate_strategy(strategy_name)
 
-        # Switch off all strategies
-        self.switch_all_strategies_on_off(False)
+    def switch_off_and_liquidate_strategy(self, strategy_name: str) -> None:
+        """
+        Liquidate all holdings of the strategy.
+
+        Note that:
+        - The strategy would be switched off
+        - There is no guarantee that the book would be clean after running this function
+            - Some positions can be dangling order when this function is triggered
+        """
+        all_portfolio_holdings = self._portfolio_manager.portfolio_info_df
+        strategy_portfolio_holdings = all_portfolio_holdings.loc[all_portfolio_holdings['strategy_name'] == strategy_name]
+
+        # Switch off strategy
+        self.switch_strategy_on_off(strategy_name, False)
 
         # Go through the holdings and do unwind trades
-        for _, holding in current_holdings.iterrows():
-            # Retrieve contract
-            contract_to_trade = self.contract_dict[holding['symbol'].iloc[0]]
-            trade_object = self._order_manager.order_wrapper(contract_to_trade, -holding['position'].iloc[0])
-
-        # Clear all records in portfolio manager
-        self._portfolio_manager.portfolio_info_df = self._portfolio_manager.portfolio_info_df[0:0]
-        self._portfolio_manager.contract_info_df = self._portfolio_manager.contract_info_df[0:0]
+        for _, holding in strategy_portfolio_holdings.iterrows():
+            combo_to_unwind = holding['combo_name']
+            combo_units_to_unwind = -holding['combo_position']
+            self._strategy_dict[strategy_name].set_combo_order({combo_to_unwind: combo_units_to_unwind})
+            self._strategy_dict[strategy_name].send_order()
