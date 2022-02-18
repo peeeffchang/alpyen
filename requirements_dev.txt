@@ -14,4 +14,4 @@ ib-insync==0.9.66
 eventkit==0.8.8
 pandas==1.3.3
 asyncio==3.4.3
-pyyaml==0.2.5
+pyyaml==3.10
