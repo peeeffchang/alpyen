@@ -442,6 +442,7 @@ def test_backtesting_traded_contracts_not_in_signal():
            == pytest.approx(0.42129, 0.0001)
 
 
+@pytest.mark.skip(reason="requires IB connection")
 def test_live_trading():
     # Subscribe to signals
     input_tickers = ['USDJPY']
@@ -477,6 +478,7 @@ def test_live_trading():
     my_trader.start_trading()
 
 
+@pytest.mark.skip(reason="requires IB connection")
 def test_live_trading_2():
     # Subscribe to signals
     input_tickers = ['USDJPY']

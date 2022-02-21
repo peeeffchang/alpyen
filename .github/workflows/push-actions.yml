@@ -1,9 +1,6 @@
 name: merge-actions
 on:
-  pull_request:
-    types: [closed]
-    branches:
-      - main
+  push
 jobs:
   run:
     runs-on: ${{ matrix.os }}
