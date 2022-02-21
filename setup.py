@@ -40,6 +40,7 @@ setup(
     },
     install_requires=requirements,
     license="GNU General Public License v3",
+    long_description_content_type="text/markdown",
     long_description=readme + '\n\n' + history,
     include_package_data=True,
     keywords='alpyen',
@@ -48,6 +49,6 @@ setup(
     test_suite='tests',
     tests_require=test_requirements,
     url='https://github.com/peeeffchang/alpyen',
-    version='1.0.1',
+    version='1.0.2',
     zip_safe=False,
 )
