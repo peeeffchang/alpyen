@@ -20,22 +20,6 @@ from alpyen import strategy
 from alpyen import utils
 
 
-@pytest.fixture
-def response():
-    """Sample pytest fixture.
-
-    See more at: http://doc.pytest.org/en/latest/fixture.html
-    """
-    # import requests
-    # return requests.get('https://github.com/audreyr/cookiecutter-pypackage')
-
-
-def test_content(response):
-    """Sample pytest test function with the pytest fixture as an argument."""
-    # from bs4 import BeautifulSoup
-    # assert 'GitHub' in BeautifulSoup(response.content).title.string
-
-
 def test_command_line_interface():
     """Test the CLI."""
     runner = CliRunner()
@@ -159,6 +143,63 @@ def test_backtesting_macrossing_resample():
         == pytest.approx(0.865, 0.05)
     assert statistics.stdev(backtest_results[strategy_name][str(backtesting.MetricType.Return)])\
         == pytest.approx(0.326, 0.05)
+
+
+def test_backtesting_macrossing_garch():
+    # Read data
+    data_folder = 'Data\\'
+    ticker_name = 'BBH'
+    file_path = os.path.join(os.path.dirname(__file__), data_folder)
+    short_lookback = 5
+    long_lookback = 200
+    short_lookback_name = ticker_name + '_MA_' + str(short_lookback)
+    long_lookback_name = ticker_name + '_MA_' + str(long_lookback)
+    ticker_names = [ticker_name]
+    all_input = datacontainer.DataUtils.aggregate_yahoo_data(ticker_names, file_path)
+
+    # Subscribe to signals
+    signal_info_dict = {}
+    signal_info_dict[short_lookback_name]\
+        = utils.SignalInfo('MA', ticker_names, [], [], short_lookback, {})
+    signal_info_dict[long_lookback_name]\
+        = utils.SignalInfo('MA', ticker_names, [], [], long_lookback, {})
+
+    # Subscribe to strategies
+    strategy_info_dict = {}
+    strategy_name = ticker_name + '_MACrossing_01'
+    strategy_info_dict[strategy_name] = utils.StrategyInfo(
+        'MACrossing',
+        [short_lookback_name, long_lookback_name],
+        1, {}, ticker_names, combo_definition={'combo1': [1.0]})
+
+    # Create backtester
+    number_path = 4000
+    my_backtester = backtesting.Backtester(all_input, ticker_names, signal_info_dict, strategy_info_dict,
+                                           number_path)
+    my_backtester.run_backtest(backtesting.PathGenerationType.GARCH_1_0_1)
+    backtest_results = my_backtester.get_results()
+
+    # Check
+    # Actual historical path
+    assert backtest_results[strategy_name][str(backtesting.MetricType.PoorMansSharpeRatio)][0]\
+           == pytest.approx(0.09503, 0.0001)
+    assert backtest_results[strategy_name][str(backtesting.MetricType.MaximumDrawDown)][0]\
+           == pytest.approx(0.11913, 0.0001)
+    assert backtest_results[strategy_name][str(backtesting.MetricType.Return)][0]\
+           == pytest.approx(0.74978, 0.0001)
+    # All (including simulated) paths
+    assert statistics.mean(backtest_results[strategy_name][str(backtesting.MetricType.PoorMansSharpeRatio)])\
+           == pytest.approx(0.112, 0.05)
+    assert statistics.stdev(backtest_results[strategy_name][str(backtesting.MetricType.PoorMansSharpeRatio)])\
+           == pytest.approx(0.0520, 0.10)
+    assert statistics.mean(backtest_results[strategy_name][str(backtesting.MetricType.MaximumDrawDown)])\
+           == pytest.approx(0.158, 0.05)
+    assert statistics.stdev(backtest_results[strategy_name][str(backtesting.MetricType.MaximumDrawDown)])\
+           == pytest.approx(0.0732, 0.05)
+    assert statistics.mean(backtest_results[strategy_name][str(backtesting.MetricType.Return)])\
+           == pytest.approx(1.019, 0.05)
+    assert statistics.stdev(backtest_results[strategy_name][str(backtesting.MetricType.Return)])\
+           == pytest.approx(0.619, 0.05)
 
 
 def test_backtesting_vaa():

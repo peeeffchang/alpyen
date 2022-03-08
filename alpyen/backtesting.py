@@ -1,8 +1,10 @@
+from arch import arch_model
 import enum
 from eventkit import Event
 from itertools import accumulate
+import numpy as np
 import random
-from typing import List, Dict
+from typing import List, Dict, Union
 
 from . import datacontainer
 from . import signal
@@ -16,6 +18,7 @@ class PathGenerationType(enum.Enum):
     """
     ReturnShuffling = 1
     ReturnResampling = 2
+    GARCH_1_0_1 = 3
 
 
 class MetricType(enum.Enum):
@@ -59,6 +62,7 @@ class Backtester:
         self._strategy_info = strategy_info
         self._number_simulation = number_simulation
         self._results: Dict[str, Dict[str, List[float]]] = {}
+        self._fitted_path_generation_model: Dict[str, ] = {}
 
     def run_backtest(self,
                      path_type: PathGenerationType = PathGenerationType.ReturnShuffling) -> None:
@@ -74,6 +78,11 @@ class Backtester:
         simulation_results_dict: Dict[str, Dict[str, List[float]]] = {}
         for key in self._strategy_info.keys():
             simulation_results_dict[key] = {}
+
+        # Fit model for path simulation
+        for j in range(len(self._aggregated_input)):
+            self._fitted_path_generation_model[self._aggregated_input[j].get_name()] = \
+                self._fit_path_generation_model(self._aggregated_input[j].get_price(), path_type)
 
         for sim_i in range(self._number_simulation):
             # Create incoming data
@@ -99,7 +108,11 @@ class Backtester:
                     price_dict[self._aggregated_input[j].get_name()] = self._aggregated_input[j].get_price()
                 else:
                     price_dict[self._aggregated_input[j].get_name()] = \
-                        self.generate_simulated_path(self._aggregated_input[j].get_price(), path_type)
+                        self.generate_simulated_path(self._aggregated_input[j].get_price(),
+                                                     self._fitted_path_generation_model[
+                                                         self._aggregated_input[j].get_name()
+                                                     ],
+                                                     path_type)
 
             for t in range(len(price_dict[next(iter(price_dict))])):
                 for k, v in data_event_dict.items():
@@ -174,8 +187,60 @@ class Backtester:
                                                    trade_combos, v.get_warmup_length(), **v.get_custom_params())
         return output_dict
 
+    def _fit_path_generation_model(self,
+                                   original_data: List[float],
+                                   path_type: PathGenerationType = PathGenerationType.ReturnShuffling):
+        """
+        Fit the model that is used for path generation
+
+        Parameters
+        ----------
+        original_data: List[float]
+            Original price data array.
+        path_type: PathGenerationType
+            Path generation type.
+
+        Returns
+        -------
+            Union[None, arch.univariate.base.ARCHModelResult]
+                Fitted model for path generation.
+        """
+        if path_type == PathGenerationType.ReturnShuffling:
+            return None
+        elif path_type == PathGenerationType.ReturnResampling:
+            return None
+        elif path_type == PathGenerationType.GARCH_1_0_1:
+            return self._fit_garch_1_0_1_model(original_data)
+        else:
+            raise ValueError('Backtester.generate_simulated_path: Unknown generation type.')
+
+    def _fit_garch_1_0_1_model(self, original_data: List[float]):
+        """
+        Fit the model that is used for path generation
+
+        Parameters
+        ----------
+        original_data: List[float]
+            Original price data array.
+
+        Returns
+        -------
+            arch.univariate.base.ARCHModelResult
+                Fitted model for path generation.
+        """
+        # Calculate return from price
+        return_list = [p_t / p_tm1 - 1 for p_t, p_tm1 in zip(original_data[1:], original_data[:-1])]
+
+        # Fitting
+        scaled_return_list = [100 * r for r in return_list]
+        scaled_return_array = np.reshape(scaled_return_list, [len(scaled_return_list), 1])
+        arch_model_ = arch_model(scaled_return_array, vol='Garch', p=1, o=0, q=1, dist='Normal')
+        arch_model_fitted = arch_model_.fit(first_obs=0)
+        return arch_model_fitted
+
     def generate_simulated_path(self,
                                 original_data: List[float],
+                                fitted_model,
                                 path_type: PathGenerationType = PathGenerationType.ReturnShuffling) -> List[float]:
         """
         Generate simulated path from original price data.
@@ -184,6 +249,8 @@ class Backtester:
         ----------
         original_data: List[float]
             Original price data array.
+        fitted_model
+            Fitted model for path generation.
         path_type: PathGenerationType
             Path generation type.
 
@@ -196,6 +263,8 @@ class Backtester:
             return self.generate_shuffled_return_path(original_data)
         elif path_type == PathGenerationType.ReturnResampling:
             return self.generate_resampled_return_path(original_data)
+        elif path_type == PathGenerationType.GARCH_1_0_1:
+            return self.generate_garch_1_0_1_return_path(original_data, fitted_model)
         else:
             raise ValueError('Backtester.generate_simulated_path: Unknown generation type.')
 
@@ -253,6 +322,33 @@ class Backtester:
         price_t0 = original_data[0]
         return_randomized = [price_t0] + return_randomized
         new_data = [*accumulate(return_randomized, lambda a, b: a * (1.0 + b))]
+        return new_data
+
+    def generate_garch_1_0_1_return_path(self,
+                                         original_data: List[float],
+                                         fitted_model) -> List[float]:
+        """
+        Generate GARCH(1,0,1) path from original price data.
+
+        Parameters
+        ----------
+        original_data: List[float]
+            Original price data array.
+        fitted_model: arch.univariate.base.ARCHModelResult
+            Fitted Garch model.
+        Returns
+        -------
+            List[float]
+                Simulated price data.
+        """
+        # Forecast
+        garch_forecasts = fitted_model.forecast(start=0, method='simulation', simulations=2)
+        simulated_return = np.reshape(garch_forecasts.simulations.values[:, 0, :], [len(original_data) - 1]) / 100.0
+
+        # Create new price series
+        price_t0 = original_data[0]
+        return_list = [price_t0] + simulated_return.tolist()
+        new_data = [*accumulate(return_list, lambda a, b: a * (1.0 + b))]
         return new_data
 
     def calculate_metrics(self,
