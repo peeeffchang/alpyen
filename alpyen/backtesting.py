@@ -4,7 +4,7 @@ from eventkit import Event
 from itertools import accumulate
 import numpy as np
 import random
-from typing import List, Dict
+from typing import List, Dict, Union
 
 from . import datacontainer
 from . import signal
@@ -202,7 +202,7 @@ class Backtester:
 
         Returns
         -------
-            var
+            Union[None, arch.univariate.base.ARCHModelResult]
                 Fitted model for path generation.
         """
         if path_type == PathGenerationType.ReturnShuffling:
