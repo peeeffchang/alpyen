@@ -1,7 +1,8 @@
 # This should be the only file that accesses broker api
 from abc import abstractmethod
-from datetime import date
+from datetime import date, datetime, timedelta
 from eventkit import Event
+import gemini # For Gemini
 import ib_insync as ibi  # For Interactive Brokers (IB)
 import pandas as pd
 from typing import Optional, Dict, List
@@ -35,7 +36,8 @@ class BrokerEventRelayBase:
     def __new__(cls,
                 signature_str: str,
                 data_name: str,
-                ohlc: utils.PriceOHLCType = utils.PriceOHLCType.Close
+                ohlc: utils.PriceOHLCType = utils.PriceOHLCType.Close,
+                **kwargs
                 ):
         """
         Initialize broker event relay.
@@ -63,7 +65,8 @@ class BrokerEventRelayBase:
     def __init__(self,
                  signature_str: str,
                  data_name: str,
-                 ohlc: utils.PriceOHLCType = utils.PriceOHLCType.Close) -> None:
+                 ohlc: utils.PriceOHLCType = utils.PriceOHLCType.Close,
+                 **kwargs) -> None:
         pass
 
     def get_event(self) -> Event:
@@ -133,9 +136,9 @@ class BrokerContractBase:
                  expiry: Optional[date] = None) -> None:
         pass
 
-    @abstractmethod
     def create_contract(self):
-        pass
+        """By default, use the symbol itself as contract."""
+        return self._symbol
 
     @abstractmethod
     def type_translation(self, type_: utils.ContractType) -> str:
@@ -169,24 +172,30 @@ class BrokerAPIBase:
         return self._broker_api_signature
 
     def __new__(cls,
-                signature_str: str):
+                signature_str: str,
+                bar_duration: int = 5,
+                **kwargs):
         if signature_str not in cls.get_class_registry():
             raise ValueError('BrokerAPIBase.__new__: ' + signature_str + ' is not a valid key.')
 
         my_api_obj = super().__new__(cls.get_class_registry()[signature_str])
+        my_api_obj._bar_duration = bar_duration
         return my_api_obj
 
     def __init__(self,
                  signature_str: str) -> None:
         pass
 
-    def get_handle(self):
-        return self._handle
-
     @abstractmethod
     def request_live_bars(self,
                           contract: BrokerContractBase,
-                          price_type: utils.PriceBidAskType):
+                          price_type: utils.PriceBidAskType) -> Event:
+        pass
+
+    @abstractmethod
+    def request_ticks(self,
+                      contract: BrokerContractBase,
+                      price_type: utils.PriceBidAskType):
         pass
 
     @abstractmethod
@@ -215,6 +224,9 @@ class IBBrokerAPI(BrokerAPIBase):
         ibi.util.startLoop()
         self._handle = ibi.IB()
 
+    def get_handle(self):
+        return self._handle
+
     def connect(self,
                 address: str = '127.0.0.1',
                 port: int = 4002,
@@ -241,7 +253,7 @@ class IBBrokerAPI(BrokerAPIBase):
                 temp_dict['Margin Requirement'] = account_value_item.value
             elif account_value_item.tag == 'BuyingPower':
                 temp_dict['Buying Power'] = account_value_item.value
-        output_df = output_df.append(temp_dict, ignore_index=True)
+        output_df.append(temp_dict, ignore_index=True)
         return output_df
 
     def get_portfolio_info(self) -> pd.DataFrame:
@@ -256,7 +268,7 @@ class IBBrokerAPI(BrokerAPIBase):
             temp_dict['Mkt Price'] = portfolio_item.marketPrice
             temp_dict['Realized PnL'] = portfolio_item.realizedPNL
             temp_dict['Unrealized PnL'] = portfolio_item.unrealizedPNL
-            output_df = output_df.append(temp_dict, ignore_index=True)
+            output_df.append(temp_dict, ignore_index=True)
         return output_df
 
     class IBBrokerEventRelay(BrokerEventRelayBase):
@@ -342,7 +354,7 @@ class IBBrokerAPI(BrokerAPIBase):
 
     def request_live_bars(self,
                           contract: IBBrokerContract,
-                          price_type: utils.PriceBidAskType):
+                          price_type: utils.PriceBidAskType) -> Event:
         """
         Request live price data bars.
 
@@ -352,11 +364,218 @@ class IBBrokerAPI(BrokerAPIBase):
             IB contract.
         price_type: utils.PriceBidAskType
             Price type.
+
+        Returns
+        -------
+            Event
+                Bar event.
         """
         ib_price_type_dict: Dict[utils.PriceBidAskType, str] = {utils.PriceBidAskType.Bid: 'BID',
                                                                 utils.PriceBidAskType.Ask: 'ASK',
                                                                 utils.PriceBidAskType.Mid: 'MIDPOINT'}
-        return self.get_handle().reqRealTimeBars(contract.get_contract(), 5, ib_price_type_dict[price_type], False)
+        return self.get_handle().reqRealTimeBars(contract.get_contract(),
+                                                 5,
+                                                 ib_price_type_dict[price_type],
+                                                 False).updateEvent
+
+
+class MarketDataWSEventEmitting(gemini.MarketDataWS):
+    """An event-emitting version of gemini.MarketDataWS upon getting update."""
+    """The get_event method is overridden."""
+
+    def __init__(self, product_id, sandbox=False):
+        super().__init__(product_id, sandbox=sandbox)
+        self._product_id = product_id
+        self.tick_event = Event('GeminiTickEvent_' + product_id)
+
+    def on_message(self, msg):
+        gemini_price_type_dict: Dict[str, utils.PriceBidAskType] = {'bid': utils.PriceBidAskType.Bid,
+                                                                    'ask': utils.PriceBidAskType.Ask}
+        # There's no native mid so we have to proxy it using get_ticker of PublicClient.
+        # get_ticker returns latest activities.
+        recent_activity = gemini.PublicClient().get_ticker(self._product_id)
+        self.tick_event.emit((float(recent_activity['bid']) +
+                              float(recent_activity['ask'])) / 2.0,
+                             utils.PriceBidAskType.Mid,
+                             datetime.fromtimestamp(recent_activity['volume']['timestamp'] / 1000.0))
+
+        # Bid and ask
+        if msg['socket_sequence'] >= 1:
+            if len(msg['events']) == 1:
+                event = msg['events'][0]
+                if event['type'] == 'trade':
+                    self.tick_event.emit(event['price'],
+                                         gemini_price_type_dict[event['makerSide']],
+                                         datetime.fromtimestamp(msg['timestampms'] / 1000.0))
+            else:
+                # TBD: Handle other events
+                pass
+
+    def get_event(self) -> Event:
+        return self.tick_event
+
+
+class GeminiBrokerAPI(BrokerAPIBase):
+    """Class for Gemini API handle."""
+
+    _broker_api_signature = 'Gemini'
+
+    def __init__(self, signature_str: str, **kwargs) -> None:
+        """
+        Initialize GeminiBrokerAPI.
+
+        Parameters
+        ----------
+        signature_str: str
+            Unique signature of the broker API.
+
+        Other Parameters
+        ----------------
+        sandbox: bool
+            Whether we are in sandbox mode.
+        """
+        default_kwargs = {'sandbox': True}
+        kwargs = {**default_kwargs, **kwargs}
+
+        sandbox = kwargs['sandbox']
+        self._public_client = gemini.PublicClient(sandbox=sandbox)
+        self._is_sandbox = sandbox
+        self._market_data_web_sockets = {}
+        self._tick_aggregators = {}
+
+    def get_is_sandbox(self) -> bool:
+        return self._is_sandbox
+
+    def connect(self) -> None:
+        pass
+
+    def disconnect(self):
+        for web_socket in self._market_data_web_sockets.values():
+            web_socket.close()
+
+    def get_handle(self):
+        return None
+
+    # def get_account_info(self) -> pd.DataFrame:
+    #     output_df = pd.DataFrame(columns=['Net Value', 'Margin Requirement', 'Buying Power'])
+    #     account_value_list = self.get_handle().accountSummary()
+    #     temp_dict = {}
+    #     for account_value_item in account_value_list:
+    #         if account_value_item.tag == 'NetLiquidation':
+    #             temp_dict['Net Value'] = account_value_item.value
+    #         elif account_value_item.tag == 'MaintMarginReq':
+    #             temp_dict['Margin Requirement'] = account_value_item.value
+    #         elif account_value_item.tag == 'BuyingPower':
+    #             temp_dict['Buying Power'] = account_value_item.value
+    #     output_df.append(temp_dict, ignore_index=True)
+    #     return output_df
+    #
+    # def get_portfolio_info(self) -> pd.DataFrame:
+    #     output_df = pd.DataFrame(columns=['Security', 'Amount', 'Avg Cost',
+    #                                       'Mkt Price', 'Realized PnL', 'Unrealized PnL'])
+    #     my_portfolio = self.get_handle().portfolio()
+    #     for portfolio_item in my_portfolio:
+    #         temp_dict = {}
+    #         temp_dict['Security'] = portfolio_item.contract.symbol
+    #         temp_dict['Amount'] = portfolio_item.position
+    #         temp_dict['Avg Cost'] = portfolio_item.averageCost
+    #         temp_dict['Mkt Price'] = portfolio_item.marketPrice
+    #         temp_dict['Realized PnL'] = portfolio_item.realizedPNL
+    #         temp_dict['Unrealized PnL'] = portfolio_item.unrealizedPNL
+    #         output_df.append(temp_dict, ignore_index=True)
+    #     return output_df
+    #
+    class GeminiBrokerEventRelay(BrokerEventRelayBase):
+        """Gemini event relay"""
+        _broker_relay_signature = 'Gemini'
+
+        def __init__(self,
+                     signature_str: str,
+                     data_name: str,
+                     ohlc: utils.PriceOHLCType = utils.PriceOHLCType.Close
+                     ) -> None:
+            """
+            Initialize Gemini event relay.
+
+            Parameters
+            ----------
+            signature_str: str
+                Unique signature of the relay class.
+            data_name: str
+                Name of the input data.
+            ohlc: utils.PriceOHLCType
+                OHLC name (open, high, low, close, volume, etc.).
+            """
+            pass
+
+        # TBD: Add different relay member functions (open, high, low, close, volume)
+        def live_bar(self,
+                     bars: utils.Bar) -> None:
+            """
+            Translate Bar event into price update.
+
+            Parameters
+            ----------
+            bars: Bar
+                Bar object.
+            """
+            if self._ohlc == utils.PriceOHLCType.Close:
+                field = bars.get_close()
+            else:
+                raise TypeError('GeminiBrokerEventRelay.live_bar: Unsupported data field type.')
+            relay_data = datacontainer.TimeDouble(self._data_name, bars[-1].time, field)
+            self._relay_event.emit(relay_data)
+
+    class GeminiBrokerContract(BrokerContractBase):
+        """Class for Gemini contracts."""
+        _broker_contract_signature = 'Gemini'
+
+        def __init__(self,
+                     signature_str: str,
+                     type_: utils.ContractType,
+                     symbol: str,
+                     strike: Optional[float] = None,
+                     expiry: Optional[date] = None) -> None:
+            pass
+
+        def type_translation(self, type_: utils.ContractType) -> str:
+            pass
+
+    def request_live_bars(self,
+                          contract: GeminiBrokerContract,
+                          price_type: utils.PriceBidAskType) -> Event:
+        """
+        Request live price data bars.
+
+        Parameters
+        ----------
+        contract: GeminiBrokerContract
+            Gemini contract.
+        price_type: utils.PriceBidAskType
+            Price type.
+
+        Returns
+        -------
+            Event
+                Bar event.
+        """
+        # Subscribe from broker
+        web_socket = MarketDataWSEventEmitting(contract.get_contract(), self.get_is_sandbox())
+        self._market_data_web_sockets[contract.get_contract()] = web_socket
+        web_socket.start()
+
+        bar_duration = timedelta(seconds=self._bar_duration)
+        end_time = utils.closest_end_time(bar_duration, datetime.now())
+        # Create TickToBarAggregator object that listens to web socket
+        aggregator = utils.TickToBarAggregator(contract.get_contract(),
+                                               None, None, None, None,
+                                               price_type, bar_duration, end_time)
+        self._tick_aggregators[contract.get_contract()] = aggregator
+
+        tick_event = web_socket.get_event()
+        tick_event += aggregator.update_bar
+
+        return aggregator.get_bar_event()
 
 
 class PortfolioManagerBase:
@@ -542,12 +761,12 @@ class IBPortfolioManager(PortfolioManagerBase):
                                       (self.contract_info_df['exchange'] == exchange) &
                                       (self.contract_info_df['currency'] == currency), 'position'] += position
         else:
-            self.contract_info_df = self.contract_info_df.append({'symbol': symbol,
-                                                                  'type': type_,
-                                                                  'exchange': exchange,
-                                                                  'currency': currency,
-                                                                  'position': position},
-                                                                 ignore_index=True)
+            self.contract_info_df.append({'symbol': symbol,
+                                          'type': type_,
+                                          'exchange': exchange,
+                                          'currency': currency,
+                                          'position': position},
+                                         ignore_index=True)
 
     def register_combo_trade(self,
                              strategy_name: str,
@@ -620,13 +839,80 @@ class IBPortfolioManager(PortfolioManagerBase):
                                         (self.portfolio_info_df['combo_name'] == combo_name),
                                         'combo_position']) = existing_position + combo_unit
         else:
-            self.portfolio_info_df = self.portfolio_info_df.append({'strategy_name': strategy_name,
-                                                                    'combo_name': combo_name,
-                                                                    'combo_position': combo_unit,
-                                                                    'combo_entry_price': combo_entry_price,
-                                                                    'combo_mtm_price': combo_entry_price,
-                                                                    'realized_pnl': 0.0},
-                                                                   ignore_index=True)
+            self.portfolio_info_df.append({'strategy_name': strategy_name,
+                                           'combo_name': combo_name,
+                                           'combo_position': combo_unit,
+                                           'combo_entry_price': combo_entry_price,
+                                           'combo_mtm_price': combo_entry_price,
+                                           'realized_pnl': 0.0},
+                                          ignore_index=True)
+
+
+class GeminiPortfolioManager(PortfolioManagerBase):
+    """Gemini portfolio manager."""
+    _broker_portfolio_manager_signature = 'Gemini'
+
+    def __init__(self,
+                 signature_str: str,
+                 broker_api: GeminiBrokerAPI) -> None:
+        """
+        Initialize portfolio manager.
+
+        Parameters
+        ----------
+        signature_str: str
+            Unique signature of the portfolio manager class.
+        broker_api: IBBrokerAPI
+            Gemini Broker API.
+        """
+        pass
+
+    def portfolio_update(self, ) -> None:
+        pass
+
+    def register_contract_trade(self,
+                                symbol: str,
+                                type_: str,
+                                exchange: str,
+                                currency: str,
+                                position: float) -> None:
+        """
+        Register completed contract trade from order manager
+
+        symbol: str
+            Ticker symbol.
+        type_: str
+            Contract type (stock, future, etc.).
+        exchange: str
+            Exchange traded on.
+        currency: str
+            Denomination currency.
+        position: float
+            Amount traded
+        """
+        pass
+
+    def register_combo_trade(self,
+                             strategy_name: str,
+                             combo_name: str,
+                             combo_unit: float,
+                             combo_def: List[float],
+                             combo_entry_price: float) -> None:
+        """
+        Register completed combo trade from order manager.
+
+        strategy_name: str
+            Name of the strategy placing the order.
+        combo_name: str
+            Name of the combo. Each combo in a strategy should have a unique name.
+        combo_unit: float
+            Number of combo units traded.
+        combo_def: List[float]
+            Weight that defines the combo.
+        combo_entry_price: float
+            Entry price.
+        """
+        pass
 
 
 class OrderManagerBase:
@@ -879,14 +1165,14 @@ class IBOrderManager(OrderManagerBase):
             trade_object = self.order_wrapper(contract.get_contract(), order_notional)
             trade_object.statusEvent += self.update_order_status
 
-            self.order_info_df = self.order_info_df.append({'strategy_name': strategy_name,
-                                                            'combo_name': combo_name,
-                                                            'contract_index': contract_index,
-                                                            'combo_unit': unit,
-                                                            'dangling_order': order_notional,
-                                                            'order_id': trade_object.orderStatus.orderId,
-                                                            'time_stamp': time_stamp},
-                                                           ignore_index=True)
+            self.order_info_df.append({'strategy_name': strategy_name,
+                                       'combo_name': combo_name,
+                                       'contract_index': contract_index,
+                                       'combo_unit': unit,
+                                       'dangling_order': order_notional,
+                                       'order_id': trade_object.orderStatus.orderId,
+                                       'time_stamp': time_stamp},
+                                      ignore_index=True)
 
     def update_order_status(self,
                             trade: ibi.order.Trade) -> None:
@@ -959,3 +1245,107 @@ class IBOrderManager(OrderManagerBase):
                 # Clean up dataframe by deleting rows already filled
                 self.order_info_df = self.order_info_df[~(self.order_info_df['combo_name'] == combo_name) |
                                                         ~(self.order_info_df['time_stamp'] == time_stamp)]
+
+
+class GeminiOrderManager(OrderManagerBase):
+    """Gemini order manager."""
+
+    _broker_order_manager_signature = 'Gemini'
+
+    def __init__(self,
+                 signature_str: str,
+                 broker_api: GeminiBrokerAPI,
+                 portfolio_manager: GeminiPortfolioManager,
+                 event_contract_dict: Dict[str, GeminiBrokerAPI.GeminiBrokerContract]) -> None:
+        """
+        Initialize order manager.
+
+        Parameters
+        ----------
+        signature_str: str
+            Unique signature of the order manager class.
+        broker_api: GeminiBrokerAPI
+            Gemini Broker API.
+        portfolio_manager: GeminiPortfolioManager
+            Gemini portfolio manager.
+        event_contract_dict: Dict[str, GeminiBrokerAPI.GeminiBrokerContract]
+            A dictionary allowing for mapping to contracts.
+        """
+        pass
+
+    def register_combo_level_info(self,
+                                  strategy_name: str,
+                                  contract_array: List[GeminiBrokerAPI.GeminiBrokerContract],
+                                  weight_array: List[float],
+                                  combo_name: str) -> None:
+        """
+        Register combo level information that does not show up in place_order.
+
+        Parameters
+        ----------
+        strategy_name: str
+            Name of the strategy placing the order.
+        contract_array: List[GeminiBrokerAPI.GeminiBrokerContract]
+            List of contracts to be traded.
+        weight_array: List[float]
+            Weights of the contracts to be traded.
+        combo_name: str
+            Name of the combo. Each combo in a strategy should have a unique name.
+        """
+        pass
+
+    def order_wrapper(self,
+                      contract: GeminiBrokerAPI.GeminiBrokerContract,
+                      order_amount: float,
+                      order_type: str = 'MKT'):
+        """
+        Wrapper for the broker's order function.
+
+        Parameters
+        ----------
+        contract: GeminiBrokerAPI.GeminiBrokerContract
+            Contract to be traded.
+        order_amount: float
+            Amount to trade.
+        order_type: str
+            Order type.
+        """
+        pass
+
+    def place_order(self,
+                    strategy_name: str,
+                    combo_name: str,
+                    time_stamp: str,
+                    contract_index: int,
+                    contract: GeminiBrokerAPI.GeminiBrokerContract,
+                    unit: float
+                    ) -> None:
+        """
+        Place order that is requested by strategy.
+
+        Parameters
+        ----------
+        strategy_name: str
+            Name of the strategy placing the order.
+        combo_name: str
+            Name of the combo. Each combo in a strategy should have a unique name.
+        time_stamp: str
+            Timestamp.
+        contract_index: int
+            Index of the contract as found in contract array.
+        contract: GeminiBrokerAPI.GeminiBrokerContract
+            Contract to be traded.
+        unit: float
+            Number of unit to trade.
+        """
+        pass
+
+    def update_order_status(self) -> None:
+        """
+        Update order status.
+
+        Parameters
+        ----------
+
+        """
+        pass

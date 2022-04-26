@@ -283,10 +283,10 @@ class StrategyBase(ABC):
             # Build a dataframe
             combo_mtm = pd.DataFrame(columns=['strategy_name', 'combo_name', 'combo_mtm_price'])
             for combo_name in self._combo_def.keys():
-                combo_mtm = combo_mtm.append({'strategy_name': self._strategy_name,
-                                              'combo_name': combo_name,
-                                              'combo_mtm_price': self.get_combo_mtm_price(combo_name)},
-                                             ignore_index=True)
+                combo_mtm.append({'strategy_name': self._strategy_name,
+                                  'combo_name': combo_name,
+                                  'combo_mtm_price': self.get_combo_mtm_price(combo_name)},
+                                 ignore_index=True)
             # Update
             self._order_manager.get_portfolio_manager().update_combo_mtm_price(combo_mtm)
         pass
