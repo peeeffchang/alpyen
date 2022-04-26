@@ -17,3 +17,4 @@ asyncio==3.4.3
 pyyaml==3.10
 arch==5.1.0
 numpy==1.21.5
+gemini_python==0.2.1
