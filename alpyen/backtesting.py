@@ -178,7 +178,7 @@ class Backtester:
             for i in range(len(v.get_contract_names())):
                 price_event_list.append(data_event_dict.get(v.get_contract_names()[i]))
             # Create TradeCombos
-            trade_combos = strategy.TradeCombos(price_event_list, v.get_combo_definition())
+            trade_combos = strategy.TradeCombos(price_event_list, v.get_combo_definition(), v.get_order_types())
             # Create strategy
             signal_event_list: List[Event] = []
             for i in range(len(v.get_input_names())):

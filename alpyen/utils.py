@@ -37,6 +37,15 @@ class PriceOHLCType(enum.Enum):
     Close = 4
 
 
+class OrderType(enum.Enum):
+    """
+    Enum class for price order type.
+    """
+    Market = 1
+    Limit = 2
+    StopLoss = 3
+
+
 class SignalInfo:
     """
     class for signal info.
@@ -103,7 +112,8 @@ class StrategyInfo:
                  custom_params: Dict,
                  contract_names: List[str],
                  contract_types: List[ContractType] = None,
-                 combo_definition: Dict[str, List[float]] = None) -> None:
+                 combo_definition: Dict[str, List[float]] = None,
+                 order_types: Dict[str, List[OrderType]] = None) -> None:
         """
         Initialize strategy info
 
@@ -122,14 +132,19 @@ class StrategyInfo:
         contract_types: List[ContractType]
             Contract types.
         combo_definition: Dict[str, List[float]]
-            Weight dictionay for TradeCombos creation.
+            A dictionary, with keys being combo names and values being weights to be traded.
+        order_types: Dict[str, List[OrderType]]
+            A dictionary, with keys being combo names and values being order type to use.
         """
         # Check input integrity
         if contract_types is not None:
             assert len(contract_names) == len(contract_types),\
                 'Contract names and contract types have different lengths.'
         for k, v in combo_definition.items():
-            assert len(v) == len(contract_names), 'Contract names and definition for ' + k + ' have different lengths.'
+            assert len(v) == len(contract_names), 'Contract names and weight for ' + k + ' have different lengths.'
+        if order_types is not None:
+            for k, v in order_types.items():
+                assert len(v) == len(contract_names), 'Contract names and order type for ' + k + ' have different lengths.'
 
         self._input_names = input_names
         self._warmup_length = warmup_length
@@ -138,6 +153,7 @@ class StrategyInfo:
         self._contract_names = contract_names
         self._contract_types = contract_types
         self._combo_definition = combo_definition
+        self._order_types = order_types
 
     def get_input_names(self) -> List[str]:
         return self._input_names
@@ -156,6 +172,9 @@ class StrategyInfo:
 
     def get_combo_definition(self) -> Dict[str, List[float]]:
         return self._combo_definition
+
+    def get_order_types(self) -> Dict[str, List[OrderType]]:
+        return self._order_types
 
     def get_strategy_signature(self) -> str:
         return self._strategy_signature
@@ -376,6 +395,4 @@ class TickToBarAggregator:
         self._ready_bar.update_end_time(self._current_bar.get_end_time())
 
     def publish_ready_bar(self) -> None:
-        ## DEBUG
-        print(str(self._ready_bar.get_open()) + '  ' + str(self._ready_bar.get_high()) + '   ' + str(self._ready_bar.get_low()) + '   ' + str(self._ready_bar.get_close()))
         self._bar_publication_event.emit(self._ready_bar)

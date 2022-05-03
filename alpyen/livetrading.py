@@ -1,6 +1,6 @@
 import asyncio
 from contextlib import contextmanager
-import datetime
+from datetime import datetime, timedelta
 from eventkit import Event
 from typing import Dict, List
 import yaml
@@ -21,7 +21,10 @@ class LiveTrader:
                  broker_api_signature: str,
                  signal_info: Dict[str, utils.SignalInfo],
                  strategy_info: Dict[str, utils.StrategyInfo],
-                 path_to_control_file: str
+                 path_to_control_file: str,
+                 paper_trading: bool = True,
+                 public_key: str = None,
+                 private_key: str = None
                  ) -> None:
         """
         Initialize live trader.
@@ -36,8 +39,17 @@ class LiveTrader:
             Information for building strategies.
         path_to_control_file: str
             File path to the control file.
+        paper_trading: bool
+            Whether paper trading is intended.
+        public_key: str
+            Public key for broker's private client.
+        private_key: str
+            Private key for broler's private client.
         """
-        self._broker = brokerinterface.BrokerAPIBase(broker_api_signature)
+        self._broker = brokerinterface.BrokerAPIBase(broker_api_signature,
+                                                     paper_trading=paper_trading,
+                                                     public_key=public_key,
+                                                     private_key=private_key)
         self._signal_info = signal_info
         self._strategy_info = strategy_info
         self._strategy_dict = {}
@@ -85,8 +97,9 @@ class LiveTrader:
         # Subscribe to data
         for name, contract in self.contract_dict.items():
             # TBD: Allow for bid or ask
-            live_bar = self.get_broker().request_live_bars(contract, utils.PriceBidAskType.Mid)
-            live_bar.updateEvent += relay_dict[name].live_bar
+            price_type = utils.PriceBidAskType.Mid
+            live_bar_event = self.get_broker().request_live_bars(contract, price_type)
+            live_bar_event += relay_dict[name].live_bar
 
         # Create strategies
         strategy_dict = self.create_strategy_dict(signal_dict, data_event_dict, self._order_manager)
@@ -123,7 +136,7 @@ class LiveTrader:
                 if not instruction_info['activity']['is_active']:
                     # is_active has top priority
                     self._is_trading = False
-            elif self._run_until is not None and self._run_until < datetime.datetime.now():
+            elif self._run_until is not None and self._run_until < datetime.now():
                 # Time to shut down
                 self._is_trading = False
 
@@ -136,9 +149,9 @@ class LiveTrader:
             elif ((instruction_info['activity']['seconds_to_shut_down'] is not None)
                     and (self._run_until is None)):
                 # We only consider seconds_to_shut_down at start up, otherwise we run into infinite loop
-                datetime_now = datetime.datetime.now()
+                datetime_now = datetime.now()
                 self._run_until = datetime_now\
-                    + datetime.timedelta(0, int(instruction_info['activity']['seconds_to_shut_down']))
+                    + timedelta(0, int(instruction_info['activity']['seconds_to_shut_down']))
 
             if instruction_info['activity']['liquidate'] is not None:
                 for strategy_name in instruction_info['activity']['liquidate']:
@@ -270,7 +283,7 @@ class LiveTrader:
             for i in range(len(v.get_contract_names())):
                 price_event_list.append(data_event_dict.get(v.get_contract_names()[i]))
             # Create TradeCombos
-            trade_combos = strategy.TradeCombos(price_event_list, v.get_combo_definition())
+            trade_combos = strategy.TradeCombos(price_event_list, v.get_combo_definition(), v.get_order_types())
             # Create strategy
             signal_event_list: List[Event] = []
             for i in range(len(v.get_input_names())):

@@ -147,6 +147,9 @@ class BrokerContractBase:
     def get_contract(self):
         return self._contract
 
+    def get_symbol(self) -> str:
+        return self._symbol
+
 
 class BrokerAPIBase:
     """Base class for broker API handle."""
@@ -186,6 +189,9 @@ class BrokerAPIBase:
                  signature_str: str) -> None:
         pass
 
+    def get_handle(self):
+        return self._handle
+
     @abstractmethod
     def request_live_bars(self,
                           contract: BrokerContractBase,
@@ -223,9 +229,6 @@ class IBBrokerAPI(BrokerAPIBase):
     def __init__(self, signature_str: str) -> None:
         ibi.util.startLoop()
         self._handle = ibi.IB()
-
-    def get_handle(self):
-        return self._handle
 
     def connect(self,
                 address: str = '127.0.0.1',
@@ -379,42 +382,6 @@ class IBBrokerAPI(BrokerAPIBase):
                                                  False).updateEvent
 
 
-class MarketDataWSEventEmitting(gemini.MarketDataWS):
-    """An event-emitting version of gemini.MarketDataWS upon getting update."""
-    """The get_event method is overridden."""
-
-    def __init__(self, product_id, sandbox=False):
-        super().__init__(product_id, sandbox=sandbox)
-        self._product_id = product_id
-        self.tick_event = Event('GeminiTickEvent_' + product_id)
-
-    def on_message(self, msg):
-        gemini_price_type_dict: Dict[str, utils.PriceBidAskType] = {'bid': utils.PriceBidAskType.Bid,
-                                                                    'ask': utils.PriceBidAskType.Ask}
-        # There's no native mid so we have to proxy it using get_ticker of PublicClient.
-        # get_ticker returns latest activities.
-        recent_activity = gemini.PublicClient().get_ticker(self._product_id)
-        self.tick_event.emit((float(recent_activity['bid']) +
-                              float(recent_activity['ask'])) / 2.0,
-                             utils.PriceBidAskType.Mid,
-                             datetime.fromtimestamp(recent_activity['volume']['timestamp'] / 1000.0))
-
-        # Bid and ask
-        if msg['socket_sequence'] >= 1:
-            if len(msg['events']) == 1:
-                event = msg['events'][0]
-                if event['type'] == 'trade':
-                    self.tick_event.emit(event['price'],
-                                         gemini_price_type_dict[event['makerSide']],
-                                         datetime.fromtimestamp(msg['timestampms'] / 1000.0))
-            else:
-                # TBD: Handle other events
-                pass
-
-    def get_event(self) -> Event:
-        return self.tick_event
-
-
 class GeminiBrokerAPI(BrokerAPIBase):
     """Class for Gemini API handle."""
 
@@ -433,14 +400,35 @@ class GeminiBrokerAPI(BrokerAPIBase):
         ----------------
         sandbox: bool
             Whether we are in sandbox mode.
+        sandbox: bool
+            Whether paper trading is intended.
+        public_key: str
+            Gemini public key for private client.
+        private_key: str
+            Gemini private key for private client.
         """
         default_kwargs = {'sandbox': True}
         kwargs = {**default_kwargs, **kwargs}
 
         sandbox = kwargs['sandbox']
+        if kwargs['public_key'] is None:
+            raise ValueError('GeminiBrokerAPI.__init__: Missing public key.')
+        if kwargs['private_key'] is None:
+            raise ValueError('GeminiBrokerAPI.__init__: Missing private key.')
+
         self._public_client = gemini.PublicClient(sandbox=sandbox)
+        self._private_client = gemini.PrivateClient(kwargs['public_key'],
+                                                    kwargs['private_key'],
+                                                    sandbox=sandbox)
         self._is_sandbox = sandbox
         self._market_data_web_sockets = {}
+        self._order_event_web_socket = self.OrderEventWSEventEmitting(kwargs['public_key'],
+                                                                      kwargs['private_key'],
+                                                                      sandbox=sandbox)
+        self._order_event_web_socket.start()
+
+        self._handle = self.GeminiHandle(self._public_client, self._private_client, self._order_event_web_socket)
+
         self._tick_aggregators = {}
 
     def get_is_sandbox(self) -> bool:
@@ -452,39 +440,117 @@ class GeminiBrokerAPI(BrokerAPIBase):
     def disconnect(self):
         for web_socket in self._market_data_web_sockets.values():
             web_socket.close()
+        self._order_event_web_socket.close()
 
-    def get_handle(self):
-        return None
+    class GeminiHandle:
+        def __init__(self,
+                     public_client,
+                     private_client,
+                     order_event_web_socket: 'OrderEventWSEventEmitting') -> None:
+            self._public_client = public_client
+            self._private_client = private_client
+            self._order_event_web_socket = order_event_web_socket
 
-    # def get_account_info(self) -> pd.DataFrame:
-    #     output_df = pd.DataFrame(columns=['Net Value', 'Margin Requirement', 'Buying Power'])
-    #     account_value_list = self.get_handle().accountSummary()
-    #     temp_dict = {}
-    #     for account_value_item in account_value_list:
-    #         if account_value_item.tag == 'NetLiquidation':
-    #             temp_dict['Net Value'] = account_value_item.value
-    #         elif account_value_item.tag == 'MaintMarginReq':
-    #             temp_dict['Margin Requirement'] = account_value_item.value
-    #         elif account_value_item.tag == 'BuyingPower':
-    #             temp_dict['Buying Power'] = account_value_item.value
-    #     output_df.append(temp_dict, ignore_index=True)
-    #     return output_df
-    #
-    # def get_portfolio_info(self) -> pd.DataFrame:
-    #     output_df = pd.DataFrame(columns=['Security', 'Amount', 'Avg Cost',
-    #                                       'Mkt Price', 'Realized PnL', 'Unrealized PnL'])
-    #     my_portfolio = self.get_handle().portfolio()
-    #     for portfolio_item in my_portfolio:
-    #         temp_dict = {}
-    #         temp_dict['Security'] = portfolio_item.contract.symbol
-    #         temp_dict['Amount'] = portfolio_item.position
-    #         temp_dict['Avg Cost'] = portfolio_item.averageCost
-    #         temp_dict['Mkt Price'] = portfolio_item.marketPrice
-    #         temp_dict['Realized PnL'] = portfolio_item.realizedPNL
-    #         temp_dict['Unrealized PnL'] = portfolio_item.unrealizedPNL
-    #         output_df.append(temp_dict, ignore_index=True)
-    #     return output_df
-    #
+        def get_public_client(self):
+            return self._public_client
+
+        def get_private_client(self):
+            return self._private_client
+
+        def get_order_event_web_socket(self):
+            return self._order_event_web_socket
+
+    def get_account_info(self) -> pd.DataFrame:
+        # These information are not available for Gemini.
+        output_df = pd.DataFrame(columns=['Net Value', 'Margin Requirement', 'Buying Power'])
+        return output_df
+
+    def get_portfolio_info(self) -> pd.DataFrame:
+        output_df = pd.DataFrame(columns=['Security', 'Amount', 'Avg Cost',
+                                          'Mkt Price', 'Realized PnL', 'Unrealized PnL'])
+        my_portfolio = self.get_handle().get_private_client().get_balance()
+        for portfolio_item in my_portfolio:
+            temp_dict = {}
+            temp_dict['Security'] = portfolio_item['currency']
+            temp_dict['Amount'] = portfolio_item['amount']
+            temp_dict['Avg Cost'] = None
+            temp_dict['Mkt Price'] = None
+            temp_dict['Realized PnL'] = None
+            temp_dict['Unrealized PnL'] = None
+            output_df.append(temp_dict, ignore_index=True)
+        return output_df
+
+    class MarketDataWSEventEmitting(gemini.MarketDataWS):
+        """
+        An event-emitting version of gemini.MarketDataWS upon getting update.
+        The on_message method is overridden.
+        """
+
+        def __init__(self, product_id, gemini_public_client, sandbox=False):
+            super().__init__(product_id, sandbox=sandbox)
+            self._product_id = product_id
+            self.tick_event = Event('GeminiTickEvent_' + product_id)
+            self._public_client = gemini_public_client
+
+        def on_message(self, msg):
+            gemini_price_type_dict: Dict[str, utils.PriceBidAskType] = {'bid': utils.PriceBidAskType.Bid,
+                                                                        'ask': utils.PriceBidAskType.Ask}
+            # There's no native mid so we have to proxy it using get_ticker of PublicClient.
+            # get_ticker returns latest activities.
+            recent_activity = self._public_client.get_ticker(self._product_id)
+            self.tick_event.emit((float(recent_activity['bid']) +
+                                  float(recent_activity['ask'])) / 2.0,
+                                 utils.PriceBidAskType.Mid,
+                                 datetime.fromtimestamp(recent_activity[ 'volume']['timestamp'] / 1000.0))
+
+            # Bid and ask
+            if msg['socket_sequence'] >= 1:
+                if len(msg['events']) == 1:
+                    event = msg['events'][0]
+                    if event['type'] == 'trade':
+                        self.tick_event.emit(event['price'],
+                                             gemini_price_type_dict[event['makerSide']],
+                                             datetime.fromtimestamp(msg['timestampms'] / 1000.0))
+                else:
+                    # TBD: Handle other events
+                    pass
+
+        def get_event(self) -> Event:
+            return self.tick_event
+
+    class OrderEventWSEventEmitting(gemini.OrderEventsWS):
+        """
+        An event-emitting version of gemini.OrderEventsWS upon getting update.
+        The on_message method is overridden.
+        """
+
+        def __init__(self, PUBLIC_API_KEY, PRIVATE_API_KEY, sandbox=False):
+            super().__init__(PUBLIC_API_KEY, PRIVATE_API_KEY, sandbox=sandbox)
+            self.order_event = Event('GeminiOrderEvent')
+
+        def on_message(self, msg):
+            if isinstance(msg, list):
+                if len(msg) > 0:
+                    # DEBUG
+                    print(msg)
+                    for item in msg:
+                        if item['type'] == 'fill':
+                            # DEBUG
+                            print('here')
+                            self.order_event.emit(item['order_id'],
+                                                  item['side'] == 'buy',
+                                                  float(item['avg_execution_price']),
+                                                  float(item['fill']['amount']),
+                                                  item['symbol'],
+                                                  'CryptoFX',
+                                                  'Gemini',
+                                                  item['symbol'][-3:])
+                        else:
+                            pass
+
+        def get_event(self) -> Event:
+            return self.order_event
+
     class GeminiBrokerEventRelay(BrokerEventRelayBase):
         """Gemini event relay"""
         _broker_relay_signature = 'Gemini'
@@ -523,7 +589,7 @@ class GeminiBrokerAPI(BrokerAPIBase):
                 field = bars.get_close()
             else:
                 raise TypeError('GeminiBrokerEventRelay.live_bar: Unsupported data field type.')
-            relay_data = datacontainer.TimeDouble(self._data_name, bars[-1].time, field)
+            relay_data = datacontainer.TimeDouble(self._data_name, bars.get_end_time(), field)
             self._relay_event.emit(relay_data)
 
     class GeminiBrokerContract(BrokerContractBase):
@@ -560,7 +626,9 @@ class GeminiBrokerAPI(BrokerAPIBase):
                 Bar event.
         """
         # Subscribe from broker
-        web_socket = MarketDataWSEventEmitting(contract.get_contract(), self.get_is_sandbox())
+        web_socket = self.MarketDataWSEventEmitting(contract.get_contract(),
+                                                    gemini.PublicClient(),
+                                                    self.get_is_sandbox())
         self._market_data_web_sockets[contract.get_contract()] = web_socket
         web_socket.start()
 
@@ -691,47 +759,6 @@ class PortfolioManagerBase:
     def get_portfolio_info(self) -> pd.DataFrame:
         return self.portfolio_info_df
 
-    @abstractmethod
-    def portfolio_update(self, **kwargs) -> None:
-        pass
-
-    @abstractmethod
-    def register_contract_trade(self, **kwargs) -> None:
-        """
-        Register completed contract trade from order manager
-        """
-        pass
-
-    @abstractmethod
-    def register_combo_trade(self, **kwargs) -> None:
-        """
-        Register completed combo trade from order manager
-        """
-        pass
-
-
-class IBPortfolioManager(PortfolioManagerBase):
-    """IB portfolio manager."""
-    _broker_portfolio_manager_signature = 'IB'
-
-    def __init__(self,
-                 signature_str: str,
-                 broker_api: IBBrokerAPI) -> None:
-        """
-        Initialize portfolio manager.
-
-        Parameters
-        ----------
-        signature_str: str
-            Unique signature of the portfolio manager class.
-        broker_api: IBBrokerAPI
-            IB Broker API.
-        """
-        pass
-
-    def portfolio_update(self, ) -> None:
-        pass
-
     def register_contract_trade(self,
                                 symbol: str,
                                 type_: str,
@@ -848,6 +875,26 @@ class IBPortfolioManager(PortfolioManagerBase):
                                           ignore_index=True)
 
 
+class IBPortfolioManager(PortfolioManagerBase):
+    """IB portfolio manager."""
+    _broker_portfolio_manager_signature = 'IB'
+
+    def __init__(self,
+                 signature_str: str,
+                 broker_api: IBBrokerAPI) -> None:
+        """
+        Initialize portfolio manager.
+
+        Parameters
+        ----------
+        signature_str: str
+            Unique signature of the portfolio manager class.
+        broker_api: IBBrokerAPI
+            IB Broker API.
+        """
+        pass
+
+
 class GeminiPortfolioManager(PortfolioManagerBase):
     """Gemini portfolio manager."""
     _broker_portfolio_manager_signature = 'Gemini'
@@ -864,53 +911,6 @@ class GeminiPortfolioManager(PortfolioManagerBase):
             Unique signature of the portfolio manager class.
         broker_api: IBBrokerAPI
             Gemini Broker API.
-        """
-        pass
-
-    def portfolio_update(self, ) -> None:
-        pass
-
-    def register_contract_trade(self,
-                                symbol: str,
-                                type_: str,
-                                exchange: str,
-                                currency: str,
-                                position: float) -> None:
-        """
-        Register completed contract trade from order manager
-
-        symbol: str
-            Ticker symbol.
-        type_: str
-            Contract type (stock, future, etc.).
-        exchange: str
-            Exchange traded on.
-        currency: str
-            Denomination currency.
-        position: float
-            Amount traded
-        """
-        pass
-
-    def register_combo_trade(self,
-                             strategy_name: str,
-                             combo_name: str,
-                             combo_unit: float,
-                             combo_def: List[float],
-                             combo_entry_price: float) -> None:
-        """
-        Register completed combo trade from order manager.
-
-        strategy_name: str
-            Name of the strategy placing the order.
-        combo_name: str
-            Name of the combo. Each combo in a strategy should have a unique name.
-        combo_unit: float
-            Number of combo units traded.
-        combo_def: List[float]
-            Weight that defines the combo.
-        combo_entry_price: float
-            Entry price.
         """
         pass
 
@@ -977,10 +977,8 @@ class OrderManagerBase:
                                                                    'combo_unit', 'dangling_order', 'entry_price',
                                                                    'order_id', 'time_stamp'])
 
-        my_order_manager_obj._strategy_contracts: Dict[
-            str, List[BrokerContractBase]] = {}  # A dictionary { strategy_name: contract_array }
-        my_order_manager_obj._combo_weight: Dict[
-            (str, str), List[float]] = {}  # A dictionary { (strategy_name, combo_name): combo_weight }
+        my_order_manager_obj._strategy_contracts = {}  # A dictionary { strategy_name: contract_array }
+        my_order_manager_obj._combo_weight = {}  # A dictionary { (strategy_name, combo_name): combo_weight }
 
         my_order_manager_obj._event_contract_dict = event_contract_dict
 
@@ -1006,7 +1004,9 @@ class OrderManagerBase:
                     time_stamp: str,
                     contract_index: int,
                     contract: BrokerContractBase,
-                    unit: float
+                    unit: float,
+                    order_type: utils.OrderType = utils.OrderType.Market,
+                    limit_price: float = None
                     ) -> None:
         """
         Place order that is requested by strategy.
@@ -1025,10 +1025,13 @@ class OrderManagerBase:
             Contract to be traded.
         unit: float
             Number of unit to trade.
+        order_type: utils.OrderType
+            Order type.
+        limit_price: float
+            Limit price.
         """
         pass
 
-    @abstractmethod
     def register_combo_level_info(self,
                                   strategy_name: str,
                                   contract_array: List[BrokerContractBase],
@@ -1048,146 +1051,46 @@ class OrderManagerBase:
         combo_name: str
             Name of the combo. Each combo in a strategy should have a unique name.
         """
-        pass
+        self._strategy_contracts[strategy_name] = contract_array
+        self._combo_weight[(strategy_name, combo_name)] = weight_array
 
     @abstractmethod
     def update_order_status(self,
                             **kwargs) -> None:
         pass
 
-    @abstractmethod
-    def order_wrapper(self, **kwargs):
-        pass
-
-
-class IBOrderManager(OrderManagerBase):
-    """IB order manager."""
-
-    _broker_order_manager_signature = 'IB'
-
-    def __init__(self,
-                 signature_str: str,
-                 broker_api: IBBrokerAPI,
-                 portfolio_manager: IBPortfolioManager,
-                 event_contract_dict: Dict[str, IBBrokerAPI.IBBrokerContract]) -> None:
+    def update_order_status_base(self,
+                                 order_id: int,
+                                 is_buy: bool,
+                                 average_fill_price: float,
+                                 filled_amount: float,
+                                 contract_symbol: str,
+                                 contract_type: str,
+                                 exchange: str,
+                                 currency: str
+                                 ) -> None:
         """
-        Initialize order manager.
+        Perform the actual updating logic.
 
         Parameters
         ----------
-        signature_str: str
-            Unique signature of the order manager class.
-        broker_api: IBBrokerAPI
-            IB Broker API.
-        portfolio_manager: IBPortfolioManager
-            IB portfolio manager.
-        event_contract_dict: Dict[str, IBBrokerAPI.IBBrokerContract]
-            A dictionary allowing for mapping to contracts.
+        order_id: int
+            Order id.
+        is_buy: bool
+            Whether it is a buy order.
+        average_fill_price: float
+            Average execution price.
+        filled_amount: float
+            Filled amount.
+        contract_symbol: str
+            Contract name.
+        contract_type: str
+            Type of contract.
+        exchange: str
+            Name of the exchange on which the trade is executed.
+        currency: str
+            Denomination currency.
         """
-        pass
-
-    def register_combo_level_info(self,
-                                  strategy_name: str,
-                                  contract_array: List[IBBrokerAPI.IBBrokerContract],
-                                  weight_array: List[float],
-                                  combo_name: str) -> None:
-        """
-        Register combo level information that does not show up in place_order.
-
-        Parameters
-        ----------
-        strategy_name: str
-            Name of the strategy placing the order.
-        contract_array: List[IBBrokerAPI.IBBrokerContract]
-            List of contracts to be traded.
-        weight_array: List[float]
-            Weights of the contracts to be traded.
-        combo_name: str
-            Name of the combo. Each combo in a strategy should have a unique name.
-        """
-        self._strategy_contracts[strategy_name] = contract_array
-        self._combo_weight[(strategy_name, combo_name)] = weight_array
-
-    def order_wrapper(self,
-                      contract: IBBrokerAPI.IBBrokerContract,
-                      order_amount: float,
-                      order_type: str = 'MKT'):
-        """
-        Wrapper for the broker's order function.
-
-        Parameters
-        ----------
-        contract: IBBrokerAPI.IBBrokerContract
-            Contract to be traded.
-        order_amount: float
-            Amount to trade.
-        order_type: str
-            Order type.
-        """
-        buy_sell: str = 'BUY' if order_amount > utils.EPSILON else 'SELL'
-        if order_type == 'MKT':
-            ib_order = ibi.order.MarketOrder(buy_sell, abs(order_amount))
-            trade_object = self._broker_handle.placeOrder(contract, ib_order)
-            return trade_object
-        else:
-            # TBD: Support other order types
-            raise ValueError('IBOrderManager.order_wrapper: Order type ' + order_type + ' is supported.')
-
-    def place_order(self,
-                    strategy_name: str,
-                    combo_name: str,
-                    time_stamp: str,
-                    contract_index: int,
-                    contract: IBBrokerAPI.IBBrokerContract,
-                    unit: float
-                    ) -> None:
-        """
-        Place order that is requested by strategy.
-
-        Parameters
-        ----------
-        strategy_name: str
-            Name of the strategy placing the order.
-        combo_name: str
-            Name of the combo. Each combo in a strategy should have a unique name.
-        time_stamp: str
-            Timestamp.
-        contract_index: int
-            Index of the contract as found in contract array.
-        contract: IBBrokerAPI.IBBrokerContract
-            Contract to be traded.
-        unit: float
-            Number of unit to trade.
-        """
-        order_notional = unit * self._combo_weight[(strategy_name, combo_name)][contract_index]
-        if abs(order_notional) > utils.EPSILON:
-            # Update order status
-            trade_object = self.order_wrapper(contract.get_contract(), order_notional)
-            trade_object.statusEvent += self.update_order_status
-
-            self.order_info_df.append({'strategy_name': strategy_name,
-                                       'combo_name': combo_name,
-                                       'contract_index': contract_index,
-                                       'combo_unit': unit,
-                                       'dangling_order': order_notional,
-                                       'order_id': trade_object.orderStatus.orderId,
-                                       'time_stamp': time_stamp},
-                                      ignore_index=True)
-
-    def update_order_status(self,
-                            trade: ibi.order.Trade) -> None:
-        """
-        Update order status.
-
-        Parameters
-        ----------
-        trade: ibi.order.Trade
-            IB Trade object.
-        """
-        order_id = trade.orderStatus.orderId
-        average_fill_price = trade.orderStatus.avgFillPrice
-        filled_amount = trade.orderStatus.filled
-
         if abs(filled_amount) > utils.EPSILON:
             # Register leg with PortfolioManager
             if order_id not in self.order_info_df['order_id'].to_list():
@@ -1202,7 +1105,7 @@ class IBOrderManager(OrderManagerBase):
                 return
 
             # Update dangling order status.
-            order_direction = 1.0 if trade.order.action == 'BUY' else -1.0
+            order_direction = 1.0 if is_buy else -1.0
             self.order_info_df.loc[self.order_info_df['order_id'] == order_id, 'dangling_order']\
                 -= order_direction * filled_amount
 
@@ -1210,10 +1113,10 @@ class IBOrderManager(OrderManagerBase):
             self.order_info_df.loc[self.order_info_df['order_id'] == order_id, 'entry_price'] = average_fill_price
 
             # Communicate update to portfolio manager.
-            self._portfolio_manager.register_contract_trade(symbol=trade.contract.symbol,
-                                                            type_=trade.contract.secType,
-                                                            exchange=trade.contract.exchange,
-                                                            currency=trade.contract.currency,
+            self._portfolio_manager.register_contract_trade(symbol=contract_symbol,
+                                                            type_=str(contract_type),
+                                                            exchange=exchange,
+                                                            currency=currency,
                                                             position=filled_amount)
 
             # Check if all legs in the combo are filled, if so update portfolio manager accordingly.
@@ -1246,6 +1149,149 @@ class IBOrderManager(OrderManagerBase):
                 self.order_info_df = self.order_info_df[~(self.order_info_df['combo_name'] == combo_name) |
                                                         ~(self.order_info_df['time_stamp'] == time_stamp)]
 
+    @abstractmethod
+    def order_wrapper(self,
+                      contract: BrokerContractBase,
+                      order_amount: float,
+                      order_type: utils.OrderType = utils.OrderType.Market,
+                      limit_price: float = None):
+        """
+        Wrapper for the broker's order function.
+
+        Parameters
+        ----------
+        contract: GeminiBrokerAPI.GeminiBrokerContract
+            Contract to be traded.
+        order_amount: float
+            Amount to trade.
+        order_type: utils.OrderType
+            Order type.
+        limit_price: float
+            Limit price for limit order.
+        """
+        pass
+
+
+class IBOrderManager(OrderManagerBase):
+    """IB order manager."""
+
+    _broker_order_manager_signature = 'IB'
+
+    def __init__(self,
+                 signature_str: str,
+                 broker_api: IBBrokerAPI,
+                 portfolio_manager: IBPortfolioManager,
+                 event_contract_dict: Dict[str, IBBrokerAPI.IBBrokerContract]) -> None:
+        """
+        Initialize order manager.
+
+        Parameters
+        ----------
+        signature_str: str
+            Unique signature of the order manager class.
+        broker_api: IBBrokerAPI
+            IB Broker API.
+        portfolio_manager: IBPortfolioManager
+            IB portfolio manager.
+        event_contract_dict: Dict[str, IBBrokerAPI.IBBrokerContract]
+            A dictionary allowing for mapping to contracts.
+        """
+        pass
+
+    def order_wrapper(self,
+                      contract: IBBrokerAPI.IBBrokerContract,
+                      order_amount: float,
+                      order_type: utils.OrderType = utils.OrderType.Market,
+                      limit_price: float = None):
+        """
+        Wrapper for the broker's order function.
+
+        Parameters
+        ----------
+        contract: IBBrokerAPI.IBBrokerContract
+            Contract to be traded.
+        order_amount: float
+            Amount to trade.
+        order_type: utils.OrderType
+            Order type.
+        limit_price: float
+            Limit price for limit order.
+        """
+        buy_sell: str = 'BUY' if order_amount > utils.EPSILON else 'SELL'
+        if order_type == utils.OrderType.Market:
+            ib_order = ibi.order.MarketOrder(buy_sell, abs(order_amount))
+            trade_object = self._broker_handle.placeOrder(contract, ib_order)
+            return trade_object
+        else:
+            # TBD: Support other order types
+            raise ValueError('IBOrderManager.order_wrapper: Order type ' + str(order_type) + ' is not supported.')
+
+    def place_order(self,
+                    strategy_name: str,
+                    combo_name: str,
+                    time_stamp: str,
+                    contract_index: int,
+                    contract: IBBrokerAPI.IBBrokerContract,
+                    unit: float,
+                    order_type: utils.OrderType = utils.OrderType.Market,
+                    limit_price: float = None
+                    ) -> None:
+        """
+        Place order that is requested by strategy.
+
+        Parameters
+        ----------
+        strategy_name: str
+            Name of the strategy placing the order.
+        combo_name: str
+            Name of the combo. Each combo in a strategy should have a unique name.
+        time_stamp: str
+            Timestamp.
+        contract_index: int
+            Index of the contract as found in contract array.
+        contract: IBBrokerAPI.IBBrokerContract
+            Contract to be traded.
+        unit: float
+            Number of unit to trade.
+        order_type: utils.OrderType
+            Order type.
+        limit_price: float
+            Limit price.
+        """
+        order_notional = unit * self._combo_weight[(strategy_name, combo_name)][contract_index]
+        if abs(order_notional) > utils.EPSILON:
+            # Update order status
+            trade_object = self.order_wrapper(contract.get_contract(), order_notional, order_type, limit_price)
+            trade_object.statusEvent += self.update_order_status
+
+            self.order_info_df.append({'strategy_name': strategy_name,
+                                       'combo_name': combo_name,
+                                       'contract_index': contract_index,
+                                       'combo_unit': unit,
+                                       'dangling_order': order_notional,
+                                       'order_id': trade_object.orderStatus.orderId,
+                                       'time_stamp': time_stamp},
+                                      ignore_index=True)
+
+    def update_order_status(self,
+                            trade: ibi.order.Trade) -> None:
+        """
+        Update order status.
+
+        Parameters
+        ----------
+        trade: ibi.order.Trade
+            IB Trade object.
+        """
+        self.update_order_status_base(trade.orderStatus.orderId,
+                                      trade.order.action == 'BUY',
+                                      trade.orderStatus.avgFillPrice,
+                                      trade.orderStatus.filled,
+                                      trade.contract.symbol,
+                                      trade.contract.secType,
+                                      trade.contract.exchange,
+                                      trade.contract.currency)
+
 
 class GeminiOrderManager(OrderManagerBase):
     """Gemini order manager."""
@@ -1271,33 +1317,14 @@ class GeminiOrderManager(OrderManagerBase):
         event_contract_dict: Dict[str, GeminiBrokerAPI.GeminiBrokerContract]
             A dictionary allowing for mapping to contracts.
         """
-        pass
-
-    def register_combo_level_info(self,
-                                  strategy_name: str,
-                                  contract_array: List[GeminiBrokerAPI.GeminiBrokerContract],
-                                  weight_array: List[float],
-                                  combo_name: str) -> None:
-        """
-        Register combo level information that does not show up in place_order.
-
-        Parameters
-        ----------
-        strategy_name: str
-            Name of the strategy placing the order.
-        contract_array: List[GeminiBrokerAPI.GeminiBrokerContract]
-            List of contracts to be traded.
-        weight_array: List[float]
-            Weights of the contracts to be traded.
-        combo_name: str
-            Name of the combo. Each combo in a strategy should have a unique name.
-        """
-        pass
+        order_event = broker_api.get_handle().get_order_event_web_socket().get_event()
+        order_event += self.update_order_status
 
     def order_wrapper(self,
                       contract: GeminiBrokerAPI.GeminiBrokerContract,
                       order_amount: float,
-                      order_type: str = 'MKT'):
+                      order_type: utils.OrderType = utils.OrderType.Market,
+                      limit_price: float = None):
         """
         Wrapper for the broker's order function.
 
@@ -1307,10 +1334,19 @@ class GeminiOrderManager(OrderManagerBase):
             Contract to be traded.
         order_amount: float
             Amount to trade.
-        order_type: str
+        order_type: utils.OrderType
             Order type.
+        limit_price: float
+            Limit price for limit order.
         """
-        pass
+        buy_sell: str = 'buy' if order_amount > utils.EPSILON else 'sell'
+
+        new_order = self._broker_handle.get_private_client().new_order(contract.get_contract(),
+                                                                       str(format(abs(order_amount), '.10f')),
+                                                                       str(format(abs(limit_price), '.2f')),
+                                                                       buy_sell,
+                                                                       options=[])
+        return new_order
 
     def place_order(self,
                     strategy_name: str,
@@ -1318,7 +1354,9 @@ class GeminiOrderManager(OrderManagerBase):
                     time_stamp: str,
                     contract_index: int,
                     contract: GeminiBrokerAPI.GeminiBrokerContract,
-                    unit: float
+                    unit: float,
+                    order_type: utils.OrderType = utils.OrderType.Market,
+                    limit_price: float = None
                     ) -> None:
         """
         Place order that is requested by strategy.
@@ -1337,15 +1375,62 @@ class GeminiOrderManager(OrderManagerBase):
             Contract to be traded.
         unit: float
             Number of unit to trade.
+        order_type: utils.OrderType
+            Order type.
+        limit_price: float
+            Limit price.
         """
-        pass
+        order_notional = unit * self._combo_weight[(strategy_name, combo_name)][contract_index]
+        if abs(order_notional) > utils.EPSILON:
+            # Update order status
+            trade_object = self.order_wrapper(contract, order_notional, order_type, limit_price)
 
-    def update_order_status(self) -> None:
+            self.order_info_df.append({'strategy_name': strategy_name,
+                                       'combo_name': combo_name,
+                                       'contract_index': contract_index,
+                                       'combo_unit': unit,
+                                       'dangling_order': order_notional,
+                                       'order_id': trade_object.orderStatus.orderId,
+                                       'time_stamp': time_stamp},
+                                      ignore_index=True)
+
+    def update_order_status(self,
+                            order_id: int,
+                            is_buy: bool,
+                            average_fill_price: float,
+                            filled_amount: float,
+                            contract_symbol: str,
+                            contract_type: str,
+                            exchange: str,
+                            currency: str
+                            ) -> None:
         """
-        Update order status.
+        Perform the actual updating logic.
 
         Parameters
         ----------
-
+        order_id: int
+            Order id.
+        is_buy: bool
+            Whether it is a buy order.
+        average_fill_price: float
+            Average execution price.
+        filled_amount: float
+            Filled amount.
+        contract_symbol: str
+            Contract name.
+        contract_type: str
+            Type of contract.
+        exchange: str
+            Name of the exchange on which the trade is executed.
+        currency: str
+            Denomination currency.
         """
-        pass
+        self.update_order_status_base(order_id,
+                                      is_buy,
+                                      average_fill_price,
+                                      filled_amount,
+                                      contract_symbol,
+                                      contract_type,
+                                      exchange,
+                                      currency)
