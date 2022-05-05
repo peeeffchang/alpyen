@@ -226,7 +226,7 @@ class IBBrokerAPI(BrokerAPIBase):
 
     _broker_api_signature = 'IB'
 
-    def __init__(self, signature_str: str) -> None:
+    def __init__(self, signature_str: str, **kwargs) -> None:
         ibi.util.startLoop()
         self._handle = ibi.IB()
 
@@ -251,12 +251,12 @@ class IBBrokerAPI(BrokerAPIBase):
         temp_dict = {}
         for account_value_item in account_value_list:
             if account_value_item.tag == 'NetLiquidation':
-                temp_dict['Net Value'] = account_value_item.value
+                temp_dict['Net Value'] = [account_value_item.value]
             elif account_value_item.tag == 'MaintMarginReq':
-                temp_dict['Margin Requirement'] = account_value_item.value
+                temp_dict['Margin Requirement'] = [account_value_item.value]
             elif account_value_item.tag == 'BuyingPower':
-                temp_dict['Buying Power'] = account_value_item.value
-        output_df.append(temp_dict, ignore_index=True)
+                temp_dict['Buying Power'] = [account_value_item.value]
+        output_df = pd.concat([output_df, pd.DataFrame.from_dict(temp_dict)])
         return output_df
 
     def get_portfolio_info(self) -> pd.DataFrame:
@@ -264,14 +264,15 @@ class IBBrokerAPI(BrokerAPIBase):
                                           'Mkt Price', 'Realized PnL', 'Unrealized PnL'])
         my_portfolio = self.get_handle().portfolio()
         for portfolio_item in my_portfolio:
-            temp_dict = {}
-            temp_dict['Security'] = portfolio_item.contract.symbol
-            temp_dict['Amount'] = portfolio_item.position
-            temp_dict['Avg Cost'] = portfolio_item.averageCost
-            temp_dict['Mkt Price'] = portfolio_item.marketPrice
-            temp_dict['Realized PnL'] = portfolio_item.realizedPNL
-            temp_dict['Unrealized PnL'] = portfolio_item.unrealizedPNL
-            output_df.append(temp_dict, ignore_index=True)
+            temp_dict = {
+                'Security': [portfolio_item.contract.symbol],
+                'Amount': [portfolio_item.position],
+                'Avg Cost': [portfolio_item.averageCost],
+                'Mkt Price': [portfolio_item.marketPrice],
+                'Realized PnL': [portfolio_item.realizedPNL],
+                'Unrealized PnL': [portfolio_item.unrealizedPNL]
+            }
+            output_df = pd.concat([output_df, pd.DataFrame.from_dict(temp_dict)])
         return output_df
 
     class IBBrokerEventRelay(BrokerEventRelayBase):
@@ -470,14 +471,15 @@ class GeminiBrokerAPI(BrokerAPIBase):
                                           'Mkt Price', 'Realized PnL', 'Unrealized PnL'])
         my_portfolio = self.get_handle().get_private_client().get_balance()
         for portfolio_item in my_portfolio:
-            temp_dict = {}
-            temp_dict['Security'] = portfolio_item['currency']
-            temp_dict['Amount'] = portfolio_item['amount']
-            temp_dict['Avg Cost'] = None
-            temp_dict['Mkt Price'] = None
-            temp_dict['Realized PnL'] = None
-            temp_dict['Unrealized PnL'] = None
-            output_df.append(temp_dict, ignore_index=True)
+            temp_dict = {
+                'Security': [portfolio_item['currency']],
+                'Amount': [portfolio_item['amount']],
+                'Avg Cost': [None],
+                'Mkt Price': [None],
+                'Realized PnL': [None],
+                'Unrealized PnL': [None]
+            }
+            output_df = pd.concat([output_df, pd.DataFrame.from_dict(temp_dict)])
         return output_df
 
     class MarketDataWSEventEmitting(gemini.MarketDataWS):
@@ -531,13 +533,9 @@ class GeminiBrokerAPI(BrokerAPIBase):
         def on_message(self, msg):
             if isinstance(msg, list):
                 if len(msg) > 0:
-                    # DEBUG
-                    print(msg)
                     for item in msg:
                         if item['type'] == 'fill':
-                            # DEBUG
-                            print('here')
-                            self.order_event.emit(item['order_id'],
+                            self.order_event.emit(int(item['order_id']),
                                                   item['side'] == 'buy',
                                                   float(item['avg_execution_price']),
                                                   float(item['fill']['amount']),
@@ -724,7 +722,8 @@ class PortfolioManagerBase:
             return
         temp_df = pd.merge(self.portfolio_info_df, combo_mtm,
                            how="left", on=['strategy_name', 'combo_name'])
-        self.portfolio_info_df['combo_mtm_price'] = temp_df['combo_mtm_price_y'].fillna(temp_df['combo_mtm_price_x'])
+        temp_df['combo_mtm_price_y'].fillna(temp_df['combo_mtm_price_x'], inplace=True)
+        self.portfolio_info_df['combo_mtm_price'] = temp_df['combo_mtm_price_y'].values
         self.portfolio_info_df['unrealized_pnl'] = ((self.portfolio_info_df['combo_mtm_price']
                                                     - self.portfolio_info_df['combo_entry_price'])
                                                     * self.portfolio_info_df['combo_position'])
@@ -788,12 +787,12 @@ class PortfolioManagerBase:
                                       (self.contract_info_df['exchange'] == exchange) &
                                       (self.contract_info_df['currency'] == currency), 'position'] += position
         else:
-            self.contract_info_df.append({'symbol': symbol,
-                                          'type': type_,
-                                          'exchange': exchange,
-                                          'currency': currency,
-                                          'position': position},
-                                         ignore_index=True)
+            new_row = {'symbol': [symbol],
+                       'type': [type_],
+                       'exchange': [exchange],
+                       'currency': [currency],
+                       'position': [position]}
+            self.contract_info_df = pd.concat([self.contract_info_df, pd.DataFrame.from_dict(new_row)])
 
     def register_combo_trade(self,
                              strategy_name: str,
@@ -856,23 +855,31 @@ class PortfolioManagerBase:
             existing_holding_direction = (existing_position / abs(existing_position)
                                           if abs(existing_position) > utils.EPSILON else 0.0)
 
+            new_realized = existing_pnl + existing_holding_direction * position_closed\
+                * (combo_entry_price - existing_entry_price)
             (self.portfolio_info_df.loc[(self.portfolio_info_df['strategy_name'] == strategy_name) &
                                         (self.portfolio_info_df['combo_name'] == combo_name),
-                                        'realized_pnl']) = existing_pnl + existing_holding_direction * position_closed\
-                * (combo_entry_price - existing_entry_price)
+                                        'realized_pnl']) = new_realized
+
+            old_unrealized = (self.portfolio_info_df.loc[(self.portfolio_info_df['strategy_name'] == strategy_name) &
+                                        (self.portfolio_info_df['combo_name'] == combo_name),
+                                        'unrealized_pnl'])
+            (self.portfolio_info_df.loc[(self.portfolio_info_df['strategy_name'] == strategy_name) &
+                                        (self.portfolio_info_df['combo_name'] == combo_name),
+                                        'unrealized_pnl']) = old_unrealized - new_realized
 
             # Update combo holding
             (self.portfolio_info_df.loc[(self.portfolio_info_df['strategy_name'] == strategy_name) &
                                         (self.portfolio_info_df['combo_name'] == combo_name),
                                         'combo_position']) = existing_position + combo_unit
         else:
-            self.portfolio_info_df.append({'strategy_name': strategy_name,
-                                           'combo_name': combo_name,
-                                           'combo_position': combo_unit,
-                                           'combo_entry_price': combo_entry_price,
-                                           'combo_mtm_price': combo_entry_price,
-                                           'realized_pnl': 0.0},
-                                          ignore_index=True)
+            new_row = {'strategy_name': [strategy_name],
+                       'combo_name': [combo_name],
+                       'combo_position': [combo_unit],
+                       'combo_entry_price': [combo_entry_price],
+                       'combo_mtm_price': [combo_entry_price],
+                       'realized_pnl': [0.0]}
+            self.portfolio_info_df = pd.concat([self.portfolio_info_df, pd.DataFrame.from_dict(new_row)])
 
 
 class IBPortfolioManager(PortfolioManagerBase):
@@ -1264,14 +1271,14 @@ class IBOrderManager(OrderManagerBase):
             trade_object = self.order_wrapper(contract.get_contract(), order_notional, order_type, limit_price)
             trade_object.statusEvent += self.update_order_status
 
-            self.order_info_df.append({'strategy_name': strategy_name,
-                                       'combo_name': combo_name,
-                                       'contract_index': contract_index,
-                                       'combo_unit': unit,
-                                       'dangling_order': order_notional,
-                                       'order_id': trade_object.orderStatus.orderId,
-                                       'time_stamp': time_stamp},
-                                      ignore_index=True)
+            new_row = {'strategy_name': [strategy_name],
+                       'combo_name': [combo_name],
+                       'contract_index': [contract_index],
+                       'combo_unit': [unit],
+                       'dangling_order': [order_notional],
+                       'order_id': [trade_object.orderStatus.orderId],
+                       'time_stamp': [time_stamp]}
+            self.order_info_df = pd.concat([self.order_info_df, pd.DataFrame.from_dict(new_row)])
 
     def update_order_status(self,
                             trade: ibi.order.Trade) -> None:
@@ -1385,14 +1392,14 @@ class GeminiOrderManager(OrderManagerBase):
             # Update order status
             trade_object = self.order_wrapper(contract, order_notional, order_type, limit_price)
 
-            self.order_info_df.append({'strategy_name': strategy_name,
-                                       'combo_name': combo_name,
-                                       'contract_index': contract_index,
-                                       'combo_unit': unit,
-                                       'dangling_order': order_notional,
-                                       'order_id': trade_object.orderStatus.orderId,
-                                       'time_stamp': time_stamp},
-                                      ignore_index=True)
+            new_row = {'strategy_name': [strategy_name],
+                       'combo_name': [combo_name],
+                       'contract_index': [contract_index],
+                       'combo_unit': [unit],
+                       'dangling_order': [order_notional],
+                       'order_id': [trade_object['order_id']],
+                       'time_stamp': [time_stamp]}
+            self.order_info_df = pd.concat([self.order_info_df, pd.DataFrame.from_dict(new_row)])
 
     def update_order_status(self,
                             order_id: int,
