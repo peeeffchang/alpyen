@@ -163,7 +163,8 @@ class LiveTrader:
         # Monitoring
         if instruction_info['monitoring'] is not None:
             if instruction_info['monitoring']['by_strategy'] is not None:
-                if instruction_info['monitoring']['by_strategy'] == 'print':
+                if instruction_info['monitoring']['by_strategy'] == 'print' \
+                        and len(self.get_portfolio_manager().get_portfolio_info()) > 0:
                     print(self.get_portfolio_manager().get_portfolio_info())
                 elif instruction_info['monitoring']['by_strategy'] == 'csv':
                     by_strategy_output_file = 'alpyen_portfolio_by_strategy.csv'
