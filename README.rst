@@ -20,6 +20,7 @@ alpyen
 .. image:: https://img.shields.io/github/commit-activity/m/peeeffchang/alpyen
 
 A lite-weight backtesting and live-trading algo engine for multiple brokers:
+
 * Interactive Brokers (IB)
 * Gemini
 
