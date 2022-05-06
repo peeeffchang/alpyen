@@ -44,7 +44,7 @@ class LiveTrader:
         public_key: str
             Public key for broker's private client.
         private_key: str
-            Private key for broler's private client.
+            Private key for broker's private client.
         """
         self._broker = brokerinterface.BrokerAPIBase(broker_api_signature,
                                                      paper_trading=paper_trading,
@@ -56,7 +56,7 @@ class LiveTrader:
         self.contract_dict = {}
         self._is_trading: bool = True
         self._path_to_control_file = path_to_control_file
-        self._run_until: datetime.datetime = None
+        self._run_until: datetime = None
 
         # Create contracts
         self.contract_dict = self.create_contract_dict()
@@ -343,7 +343,9 @@ class LiveTrader:
             - Some positions can be dangling order when this function is triggered
         """
         all_portfolio_holdings = self._portfolio_manager.portfolio_info_df
-        strategy_portfolio_holdings = all_portfolio_holdings.loc[all_portfolio_holdings['strategy_name'] == strategy_name]
+        strategy_portfolio_holdings = all_portfolio_holdings.loc[
+            all_portfolio_holdings['strategy_name'] == strategy_name
+        ]
 
         # Switch off strategy
         self.switch_strategy_on_off(strategy_name, False)

@@ -144,7 +144,8 @@ class StrategyInfo:
             assert len(v) == len(contract_names), 'Contract names and weight for ' + k + ' have different lengths.'
         if order_types is not None:
             for k, v in order_types.items():
-                assert len(v) == len(contract_names), 'Contract names and order type for ' + k + ' have different lengths.'
+                assert len(v) == len(contract_names), \
+                    'Contract names and order type for ' + k + ' have different lengths.'
 
         self._input_names = input_names
         self._warmup_length = warmup_length

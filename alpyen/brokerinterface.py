@@ -2,7 +2,7 @@
 from abc import abstractmethod
 from datetime import date, datetime, timedelta
 from eventkit import Event
-import gemini # For Gemini
+import gemini  # For Gemini
 import ib_insync as ibi  # For Interactive Brokers (IB)
 import pandas as pd
 from typing import Optional, Dict, List
@@ -199,12 +199,6 @@ class BrokerAPIBase:
         pass
 
     @abstractmethod
-    def request_ticks(self,
-                      contract: BrokerContractBase,
-                      price_type: utils.PriceBidAskType):
-        pass
-
-    @abstractmethod
     def connect(self, **kwargs) -> None:
         pass
 
@@ -237,9 +231,9 @@ class IBBrokerAPI(BrokerAPIBase):
         self.get_handle().connect(address, port, clientId=client_id)
 
     async def async_connect(self,
-                address: str = '127.0.0.1',
-                port: int = 4002,
-                client_id: int = 1) -> None:
+                            address: str = '127.0.0.1',
+                            port: int = 4002,
+                            client_id: int = 1) -> None:
         await self.get_handle().connectAsync(address, port, clientId=client_id)
 
     def disconnect(self):
@@ -503,7 +497,7 @@ class GeminiBrokerAPI(BrokerAPIBase):
             self.tick_event.emit((float(recent_activity['bid']) +
                                   float(recent_activity['ask'])) / 2.0,
                                  utils.PriceBidAskType.Mid,
-                                 datetime.fromtimestamp(recent_activity[ 'volume']['timestamp'] / 1000.0))
+                                 datetime.fromtimestamp(recent_activity['volume']['timestamp'] / 1000.0))
 
             # Bid and ask
             if msg['socket_sequence'] >= 1:
@@ -861,9 +855,11 @@ class PortfolioManagerBase:
                                         (self.portfolio_info_df['combo_name'] == combo_name),
                                         'realized_pnl']) = new_realized
 
-            old_unrealized = (self.portfolio_info_df.loc[(self.portfolio_info_df['strategy_name'] == strategy_name) &
-                                        (self.portfolio_info_df['combo_name'] == combo_name),
-                                        'unrealized_pnl'])
+            old_unrealized = (self.portfolio_info_df.loc[
+                (self.portfolio_info_df['strategy_name'] == strategy_name) &
+                (self.portfolio_info_df['combo_name'] == combo_name),
+                'unrealized_pnl'
+            ])
             (self.portfolio_info_df.loc[(self.portfolio_info_df['strategy_name'] == strategy_name) &
                                         (self.portfolio_info_df['combo_name'] == combo_name),
                                         'unrealized_pnl']) = old_unrealized - new_realized
