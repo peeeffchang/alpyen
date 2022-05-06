@@ -1397,7 +1397,7 @@ class GeminiOrderManager(OrderManagerBase):
                        'contract_index': [contract_index],
                        'combo_unit': [unit],
                        'dangling_order': [order_notional],
-                       'order_id': [trade_object['order_id']],
+                       'order_id': [int(trade_object['order_id'])],
                        'time_stamp': [time_stamp]}
             self.order_info_df = pd.concat([self.order_info_df, pd.DataFrame.from_dict(new_row)])
 
