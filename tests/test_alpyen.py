@@ -2,11 +2,13 @@
 
 """Tests for `alpyen` package."""
 
+from datetime import datetime, timedelta
 from eventkit import Event
 import os
 import pytest
 import statistics
 from typing import List, Dict
+import yaml
 
 from click.testing import CliRunner
 
@@ -239,6 +241,7 @@ def test_backtesting_vaa():
            == pytest.approx(0.08114, 0.0001)
     assert backtest_results[strategy_name][str(backtesting.MetricType.Return)][0]\
            == pytest.approx(1.01538, 0.0001)
+
 
 # Signal and Strategy for on-the-fly signal and strategy test
 class IncreaseDecrease(signal.SignalBase):
@@ -484,7 +487,7 @@ def test_backtesting_traded_contracts_not_in_signal():
 
 
 @pytest.mark.skip(reason="requires IB connection")
-def test_live_trading():
+def test_live_trading_ib():
     # Subscribe to signals
     input_tickers = ['USDJPY']
     trade_tickers = ['EURUSD', 'GBPUSD']
@@ -520,7 +523,7 @@ def test_live_trading():
 
 
 @pytest.mark.skip(reason="requires IB connection")
-def test_live_trading_2():
+def test_live_trading_ib_2():
     # Subscribe to signals
     input_tickers = ['USDJPY']
     trade_tickers = ['EURUSD', 'GBPUSD', 'CHFUSD']
@@ -550,3 +553,71 @@ def test_live_trading_2():
     path_to_control_file = 'test_control.yml'
     my_trader = livetrading.LiveTrader('IB', signal_info_dict, strategy_info_dict, path_to_control_file)
     my_trader.start_trading()
+
+
+@pytest.mark.skip(reason="requires Gemini connection")
+def test_live_trading_gemini():
+    # Subscribe to signals
+    input_tickers = ['BTCUSD']
+    trade_tickers = ['LTCUSD', 'ETHUSD']
+    signal_info_dict = {}
+
+    warmup_length = 2
+    signal_name = input_tickers[0] + '_ID_' + str(warmup_length)
+    signal_info_dict[signal_name]\
+        = utils.SignalInfo('ID',
+                           input_tickers,
+                           [utils.ContractType.FX],
+                           [utils.PriceOHLCType.Close],
+                           warmup_length,
+                           {})
+
+    # Subscribe to strategies
+    strategy_info_dict = {}
+    strategy_name = 'BISD'
+    trade_combo = {'combo1': [0.1, -0.3], 'combo2': [-0.1, 0.2]}
+    order_types = {'combo1': [utils.OrderType.Limit] * 2, 'combo2': [utils.OrderType.Limit] * 2}
+    strategy_info_dict[strategy_name] = utils.StrategyInfo(
+        'BISD',
+        [signal_name],
+        1,
+        {},
+        trade_tickers,
+        [utils.ContractType.FX] * 2,
+        trade_combo,
+        order_types
+    )
+
+    # Create live trader
+    path_to_control_file = 'test_control.yml'
+    # Keys
+    path_to_key_file = 'Temp Test Files\\Gemini_keys.yml'
+    with open(path_to_key_file, "r") as stream:
+        key_info = yaml.safe_load(stream)
+        public_key = key_info['public']
+        private_key = key_info['private']
+
+    my_trader = livetrading.LiveTrader('Gemini', signal_info_dict,
+                                       strategy_info_dict, path_to_control_file,
+                                       paper_trading=True,
+                                       public_key=public_key, private_key=private_key)
+    my_trader.start_trading()
+
+
+def test_closest_end_time():
+    time_now = datetime(year=2019, month=6, day=9, hour=14, minute=23, second=13)
+    timedelta_list = [5, 10, 15, 20, 60, 120, 300, 600, 1800, 3600, 14400]
+
+    closest_end_time_list = [utils.closest_end_time(timedelta(seconds=x), time_now) for x in timedelta_list]
+
+    assert closest_end_time_list[0] == datetime(year=2019, month=6, day=9, hour=14, minute=23, second=15)
+    assert closest_end_time_list[1] == datetime(year=2019, month=6, day=9, hour=14, minute=23, second=20)
+    assert closest_end_time_list[2] == datetime(year=2019, month=6, day=9, hour=14, minute=23, second=15)
+    assert closest_end_time_list[3] == datetime(year=2019, month=6, day=9, hour=14, minute=23, second=20)
+    assert closest_end_time_list[4] == datetime(year=2019, month=6, day=9, hour=14, minute=24, second=00)
+    assert closest_end_time_list[5] == datetime(year=2019, month=6, day=9, hour=14, minute=24, second=00)
+    assert closest_end_time_list[6] == datetime(year=2019, month=6, day=9, hour=14, minute=25, second=00)
+    assert closest_end_time_list[7] == datetime(year=2019, month=6, day=9, hour=14, minute=30, second=00)
+    assert closest_end_time_list[8] == datetime(year=2019, month=6, day=9, hour=14, minute=30, second=00)
+    assert closest_end_time_list[9] == datetime(year=2019, month=6, day=9, hour=15, minute=00, second=00)
+    assert closest_end_time_list[10] == datetime(year=2019, month=6, day=9, hour=16, minute=00, second=00)

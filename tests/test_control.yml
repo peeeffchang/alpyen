@@ -4,7 +4,7 @@ activity:
     run_until:
         
     seconds_to_shut_down:
-        60
+        120
     liquidate: # Each line should start with '-' so that it will be parsed as a list; 'all' for liquidate all
         
 strategies: # Changing the status, parameters of strategies
@@ -15,7 +15,7 @@ signals:
     
 monitoring:
     by_strategy: # 'print' or 'csv'
-        csv
+        print
     account:
         True
     portfolio:

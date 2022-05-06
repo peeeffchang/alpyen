@@ -27,7 +27,8 @@ class TradeCombos:
 
     def __init__(self,
                  contract_array: List[Event],
-                 combo_definition: Dict[str, List[float]] = None) -> None:
+                 combo_definition: Dict[str, List[float]] = None,
+                 order_types: Dict[str, List[utils.OrderType]] = None) -> None:
         """
         Initialize trade combo.
 
@@ -37,6 +38,8 @@ class TradeCombos:
             List of event subscriptions on contracts to be traded.
         combo_definition: Dict[str, List[float]]
             A dictionary, with keys being combo names and values being weights to be traded.
+        order_types: Dict[str, List[utils.OrderType]]
+            A dictionary, with keys being combo names and values being order type to use.
         """
         if combo_definition is not None:
             for key, value in combo_definition.items():
@@ -45,11 +48,31 @@ class TradeCombos:
             self._combo_definition = combo_definition
         else:
             self._combo_definition = None
+
+        if order_types is not None:
+            for key, value in order_types.items():
+                if len(contract_array) != len(value):
+                    raise ValueError('TradeCombo.__init__: Different numbers of contracts and OrderType.')
+            self._order_types = order_types
+        else:
+            if self._combo_definition is not None:
+                # Market order by default
+                self._order_types = {key: [utils.OrderType.Market] * len(contract_array)
+                                     for key in self._combo_definition.keys()}
+            else:
+                self._combo_definition = None
+
         self._contract_array = contract_array
 
     def get_combo_def(self) -> Dict[str, List[float]]:
         if self._combo_definition is not None:
             return self._combo_definition
+        else:
+            return None
+
+    def get_order_types(self) -> Dict[str, List[utils.OrderType]]:
+        if self._order_types is not None:
+            return self._order_types
         else:
             return None
 
@@ -130,6 +153,10 @@ class StrategyBase(ABC):
             my_strategy_obj._combo_def = trade_combo.get_combo_def()
         else:
             my_strategy_obj._combo_def = None
+        if not trade_combo.get_order_types() is None:
+            my_strategy_obj._order_types = trade_combo.get_order_types()
+        else:
+            my_strategy_obj._order_types = None
         my_strategy_obj._initialize_contract_time_storage(contract_array)
         my_strategy_obj._input_signal_array = input_signal_array
 
@@ -140,7 +167,9 @@ class StrategyBase(ABC):
 
         my_strategy_obj._combo_positions = {combo_name: 0.0 for combo_name in my_strategy_obj._combo_def.keys()}
 
+        # _combo_order is the combination of contracts that are meant to trade as a basket
         my_strategy_obj._combo_order = {combo_name: 0.0 for combo_name in my_strategy_obj._combo_def.keys()}
+
         my_strategy_obj._average_entry_price = {security.name(): 0.0 for security in contract_array}
         my_strategy_obj._mtm_price = {security.name(): 0.0 for security in contract_array}
 
@@ -283,10 +312,10 @@ class StrategyBase(ABC):
             # Build a dataframe
             combo_mtm = pd.DataFrame(columns=['strategy_name', 'combo_name', 'combo_mtm_price'])
             for combo_name in self._combo_def.keys():
-                combo_mtm = combo_mtm.append({'strategy_name': self._strategy_name,
-                                              'combo_name': combo_name,
-                                              'combo_mtm_price': self.get_combo_mtm_price(combo_name)},
-                                             ignore_index=True)
+                new_row = {'strategy_name': [self._strategy_name],
+                           'combo_name': [combo_name],
+                           'combo_mtm_price': [self.get_combo_mtm_price(combo_name)]}
+                combo_mtm = pd.concat([combo_mtm, pd.DataFrame.from_dict(new_row)])
             # Update
             self._order_manager.get_portfolio_manager().update_combo_mtm_price(combo_mtm)
         pass
@@ -347,6 +376,9 @@ class StrategyBase(ABC):
     def send_order_backtest(self) -> None:
         """
         Send pending orders and use latest price to calculate average cost.
+
+        Note that currently only market order is allowed.
+        TBD: Implement other order types.
         """
         if self._combo_order is None:
             return
@@ -393,19 +425,37 @@ class StrategyBase(ABC):
         for combo_name, amount in self._combo_order.items():
             if combo_name in self._combo_def:
                 combo_def = self._combo_def[combo_name]
+                order_type = self._order_types[combo_name]
                 self._order_manager.register_combo_level_info(self._strategy_name,
                                                               contract_array,
                                                               combo_def,
                                                               combo_name)
                 time_stamp = str(datetime.now())
                 for i in range(len(combo_def)):
-                    self._order_manager.place_order(self._strategy_name,
-                                                    combo_name,
-                                                    time_stamp,
-                                                    i,
-                                                    contract_array[i],
-                                                    amount
-                                                    )
+                    if order_type[i] == utils.OrderType.Market:
+                        self._order_manager.place_order(self._strategy_name,
+                                                        combo_name,
+                                                        time_stamp,
+                                                        i,
+                                                        contract_array[i],
+                                                        amount,
+                                                        order_type[i])
+                    elif order_type[i] == utils.OrderType.Limit and \
+                            self.get_mtm_price_by_name(contract_array[i].get_symbol()) is not None:
+                        # Here we use latest mtm price as limit price
+                        # TBD: Allow for custom limit price.
+                        self._order_manager.place_order(self._strategy_name,
+                                                        combo_name,
+                                                        time_stamp,
+                                                        i,
+                                                        contract_array[i],
+                                                        amount,
+                                                        order_type[i],
+                                                        self.get_mtm_price_by_name(contract_array[i].get_symbol())
+                                                        )
+                    else:
+                        raise ValueError('StrategyBase.send_order_live: order type ' +
+                                         str(order_type[i]) + ' not implemented yet.')
                 self._combo_positions[combo_name] += amount
             else:
                 # Some strategies do not have predefined combos;

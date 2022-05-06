@@ -19,11 +19,13 @@ alpyen
 .. image:: https://img.shields.io/pypi/pyversions/alpyen
 .. image:: https://img.shields.io/github/commit-activity/m/peeeffchang/alpyen
 
-A lite-weight backtesting and live-trading algo engine for IB (Interactive Brokers) and other brokers.
+A lite-weight backtesting and live-trading algo engine for multiple brokers:
+* Interactive Brokers (IB)
+* Gemini
 
 
-* Free software: GNU General Public License v3
-* Documentation: https://alpyen.readthedocs.io.
+License: GNU General Public License v3
+Documentation: https://alpyen.readthedocs.io.
 
 Features
 --------
@@ -39,10 +41,6 @@ Current Version
 ---------------
 Able to perform backtesting and live trading.
 
-Next Release
-------------
-* Gathering portfolio data from broker
-* Saving and loading sessions
 
 Support This Project
 --------------------

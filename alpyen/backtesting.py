@@ -178,7 +178,7 @@ class Backtester:
             for i in range(len(v.get_contract_names())):
                 price_event_list.append(data_event_dict.get(v.get_contract_names()[i]))
             # Create TradeCombos
-            trade_combos = strategy.TradeCombos(price_event_list, v.get_combo_definition())
+            trade_combos = strategy.TradeCombos(price_event_list, v.get_combo_definition(), v.get_order_types())
             # Create strategy
             signal_event_list: List[Event] = []
             for i in range(len(v.get_input_names())):
@@ -234,7 +234,7 @@ class Backtester:
         # Fitting
         scaled_return_list = [100 * r for r in return_list]
         scaled_return_array = np.reshape(scaled_return_list, [len(scaled_return_list), 1])
-        arch_model_ = arch_model(scaled_return_array, vol='Garch', p=1, o=0, q=1, dist='Normal')
+        arch_model_ = arch_model(scaled_return_array, vol='GARCH', p=1, o=0, q=1, dist='normal')
         arch_model_fitted = arch_model_.fit(first_obs=0)
         return arch_model_fitted
 
