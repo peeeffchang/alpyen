@@ -242,6 +242,7 @@ def test_backtesting_vaa():
     assert backtest_results[strategy_name][str(backtesting.MetricType.Return)][0]\
            == pytest.approx(1.01538, 0.0001)
 
+
 # Signal and Strategy for on-the-fly signal and strategy test
 class IncreaseDecrease(signal.SignalBase):
     _signal_signature = 'ID'
@@ -553,7 +554,8 @@ def test_live_trading_ib_2():
     my_trader = livetrading.LiveTrader('IB', signal_info_dict, strategy_info_dict, path_to_control_file)
     my_trader.start_trading()
 
-# @pytest.mark.skip(reason="requires Gemini connection")
+
+@pytest.mark.skip(reason="requires Gemini connection")
 def test_live_trading_gemini():
     # Subscribe to signals
     input_tickers = ['BTCUSD']
@@ -589,7 +591,7 @@ def test_live_trading_gemini():
     # Create live trader
     path_to_control_file = 'test_control.yml'
     # Keys
-    path_to_key_file = 'Temp Test Files\Gemini_keys.yml'
+    path_to_key_file = 'Temp Test Files\\Gemini_keys.yml'
     with open(path_to_key_file, "r") as stream:
         key_info = yaml.safe_load(stream)
         public_key = key_info['public']
